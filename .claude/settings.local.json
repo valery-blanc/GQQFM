@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(file:*)",
+      "Bash(\"C:/Users/Val/AppData/Local/Programs/Python/Python311/python.exe\" -m pip install pytest numpy scipy pandas yfinance streamlit plotly python-dateutil requests 2>&1)",
+      "Bash(\"C:/Users/Val/AppData/Local/Programs/Python/Python311/python.exe\" -m pytest --version 2>&1)",
+      "Bash(\"C:/Users/Val/AppData/Local/Programs/Python/Python311/python.exe\" -m pytest tests/test_black_scholes.py::TestBSPrice::test_put_otm tests/test_pnl.py::TestComputePnlBatch::test_smile_shape -v 2>&1)",
+      "Bash(\"C:/Users/Val/AppData/Local/Programs/Python/Python311/python.exe\" -m pytest 2>&1)",
+      "Bash(\"C:/Users/Val/AppData/Local/Programs/Python/Python311/python.exe\" -c \"from engine.backend import GPU_AVAILABLE; print\\('GPU:', GPU_AVAILABLE\\)\" 2>&1)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8501/)",
+      "Bash(ssh-copy-id:*)",
+      "Bash(ssh-keygen -R 192.168.0.133)",
+      "Bash(ssh:*)",
+      "Bash(ssh-keygen:*)",
+      "Bash(rsync --version)",
+      "Bash(bash deploy.sh)",
+      "Bash(C:/Users/Val/AppData/Local/Programs/Python/Python311/python.exe --version)",
+      "Bash(bash C:/WORK/GQQFM/deploy.sh)",
+      "Bash(ssh -i C:/Users/Val/.ssh/id_ed25519_claude Val@192.168.0.133 'powershell -Command \"\"Start-Process cmd -ArgumentList @\\(\\\\\"\"/c\\\\\"\",\\\\\"\"C:\\\\\\\\WORK\\\\\\\\GQQFM\\\\\\\\start_streamlit.bat > C:\\\\\\\\WORK\\\\\\\\GQQFM\\\\\\\\streamlit.log 2>&1\\\\\"\"\\) -WindowStyle Hidden\"\"')",
+      "Bash(scp -i C:/Users/Val/.ssh/id_ed25519_claude C:/WORK/GQQFM/start_streamlit.ps1 Val@192.168.0.133:C:/WORK/GQQFM/start_streamlit.ps1)",
+      "Bash(C:/Users/Val/AppData/Local/Programs/Python/Python311/python.exe -c \":*)",
+      "Bash(C:/Users/Val/AppData/Local/Programs/Python/Python311/python.exe -c \"\nimport yfinance as yf, math\nfrom scipy.stats import norm\n\nspot = 251.64\nrate = 0.045\n\nticker = yf.Ticker\\('AAPL'\\)\n\ndef bs_call\\(S, K, T, vol, r\\):\n    if T <= 0 or vol <= 0: return max\\(S-K, 0\\)\n    sq = vol * math.sqrt\\(T\\)\n    d1 = \\(math.log\\(S/K\\) + \\(r + 0.5*vol**2\\)*T\\) / sq\n    d2 = d1 - sq\n    return S*norm.cdf\\(d1\\) - K*math.exp\\(-r*T\\)*norm.cdf\\(d2\\)\n\ndef implied_vol\\(price, S, K, T, r, option_type='call'\\):\n    if T <= 0 or price <= 0: return 0\n    lo, hi = 1e-4, 5.0\n    for _ in range\\(60\\):\n        mid = \\(lo+hi\\)/2\n        sq = mid*math.sqrt\\(T\\)\n        d1 = \\(math.log\\(S/K\\) + \\(r+0.5*mid**2\\)*T\\) / sq\n        d2 = d1 - sq\n        if option_type == 'call':\n            val = S*norm.cdf\\(d1\\) - K*math.exp\\(-r*T\\)*norm.cdf\\(d2\\)\n        else:\n            val = K*math.exp\\(-r*T\\)*norm.cdf\\(-d2\\) - S*norm.cdf\\(-d1\\)\n        if val < price: lo = mid\n        else: hi = mid\n        if hi-lo < 1e-6: break\n    return \\(lo+hi\\)/2\n\nfrom datetime import date\ntoday = date.today\\(\\)\n\nfor exp_str in ['2026-04-01', '2026-05-15']:\n    chain = ticker.option_chain\\(exp_str\\)\n    exp = date.fromisoformat\\(exp_str\\)\n    tte = \\(exp - today\\).days / 365.0\n    print\\(f'\\\\n=== {exp_str} \\(tte={tte:.3f}y\\) ==='\\)\n    df = chain.calls\n    df = df[df['strike'].between\\(230, 280\\)]\n    for _, row in df.iterrows\\(\\):\n        K = row['strike']\n        last = float\\(row['lastPrice']\\) if row['lastPrice'] else 0\n        bid = float\\(row['bid']\\) if row['bid'] else 0\n        intrinsic = max\\(spot - K, 0\\)\n        iv_computed = implied_vol\\(last, spot, K, tte, rate\\) if last > 0 else 0\n        bs_val = bs_call\\(spot, K, tte, 0.28, rate\\)  # at 28% IV\n        print\\(f'  K={K:6.0f} last={last:6.2f} intrinsic={intrinsic:5.2f} IV_comp={iv_computed:.3f} BS@28%={bs_val:.2f}'\\)\n\" 2>&1)",
+      "Bash(bash /c/WORK/GQQFM/deploy.sh 2>&1)",
+      "Bash(python -m pytest --ignore=tests/test_event_calendar.py --ignore=tests/test_screener_scoring.py --ignore=tests/test_screener_filters.py --ignore=tests/test_screener_integration.py -v)",
+      "Bash(git rm:*)"
+    ]
+  }
+}

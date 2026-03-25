@@ -1,0 +1,7 @@
+Dans le tableau des résultats, est-ceque tu peux présenter un combo (colonne Legs) sur x lignes, 1 ligne par leg, en police plus petite pour ne pas trop agrandir le tableau, de cette façon :
+
+S3 call AAPL 09AUG2024 245.50
+L3 call AAPL 16AUG2024  250
+L1 call AAPL 16AUG2024  255.50
+L1 put AAPL 16AUG2024  255
+
