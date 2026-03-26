@@ -17,6 +17,9 @@ def render_combo_detail(combination: Combination, metrics: dict) -> None:
 
     st.caption(f"Template : `{combination.template_name}` — Clôture prévue : {combination.close_date}")
 
+    if combination.event_warning:
+        st.warning(combination.event_warning)
+
     rows = []
     for i, leg in enumerate(combination.legs, 1):
         direction = "Long (+1)" if leg.direction == 1 else "Short (−1)"

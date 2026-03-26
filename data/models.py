@@ -57,6 +57,7 @@ class Combination:
     template_name: str
     event_score_factor: float = 1.0              # multiplicateur événementiel (1.0 = neutre)
     events_in_sweet_zone: list[str] = field(default_factory=list)  # noms des événements favorables
+    event_warning: str | None = None             # warning si CRITICAL en danger zone ou near court
 
 
 @dataclass

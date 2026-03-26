@@ -158,6 +158,18 @@ def plot_pnl_profile(
             bordercolor="rgba(255,215,0,0.5)",
         )
 
+    if combination.event_warning:
+        fig.add_annotation(
+            text=f"⚠ {combination.event_warning}",
+            xref="paper", yref="paper",
+            x=0.02, y=0.02,
+            showarrow=False,
+            align="left",
+            font=dict(size=11, color="red"),
+            bgcolor="rgba(0,0,0,0.6)",
+            bordercolor="rgba(255,0,0,0.5)",
+        )
+
     title_legs = " | ".join(
         f"{'L' if leg.direction == 1 else 'S'}{leg.quantity} "
         f"{leg.option_type.upper()[0]} {leg.strike:.0f} "

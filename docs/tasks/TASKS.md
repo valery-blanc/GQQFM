@@ -112,3 +112,13 @@
 - [x] tests/test_scorer_events.py (Tests 6-9)
 - [x] docs/specs/FEAT-005-scanner-events.md
 - [x] docs/specs/option_scanner_spec_v2.md — mise à jour section 3, 5, 8, 13
+
+## FEAT-006 — Correction du filtrage événementiel dans la sélection d'expirations
+
+- [x] engine/combinator.py — _select_event_pairs : algorithme 4 étapes (remplace fallback permissif)
+- [x] data/models.py — event_warning : str | None = None dans Combination
+- [x] ui/components/combo_detail.py — affichage st.warning(event_warning) au-dessus des legs
+- [x] ui/components/chart.py — annotation rouge si event_warning
+- [x] tests/test_select_event_pairs.py — 6 tests (Tests 1-6)
+- [x] docs/specs/FEAT-006-scanner-events.md — statut DONE
+- [x] docs/specs/option_scanner_spec_v2.md — mise à jour section 5, version FEAT-006

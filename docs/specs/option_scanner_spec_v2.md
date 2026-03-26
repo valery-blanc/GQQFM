@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-005 (2026-03-25)
+> Version : FEAT-006 (2026-03-26)
 
 ## 1. Vue d'ensemble
 
@@ -198,8 +198,10 @@ class Combination:
     event_score_factor: float = 1.0              # multiplicateur événementiel (FEAT-005)
                                # > 1.0 si événement favorable en sweet zone
                                # < 1.0 si événement MODERATE en danger zone
-                               # Paires avec CRITICAL en danger zone exclues par le Combinator
+                               # Paires avec CRITICAL en danger zone exclues par le Combinator (FEAT-006)
     events_in_sweet_zone: list[str] = []         # noms des événements favorables (sweet zone)
+    event_warning: str | None = None             # FEAT-006 : warning si CRITICAL en danger zone
+                               # ou near expiry très court — affiché dans combo_detail + chart
 
 @dataclass
 class TemplateDefinition:
@@ -1208,6 +1210,7 @@ pas dans `config.py`. `config.py` ne contient que les constantes moteur.
 ### V2 (en cours / planifié)
 - ✅ Screener automatique de sous-jacents (FEAT-004)
 - ✅ Intégration EventCalendar dans le scanner — multi-paires + event_score_factor (FEAT-005)
+- ✅ Algorithme 4 étapes _select_event_pairs — fallback structuré + event_warning (FEAT-006)
 - Export des résultats (CSV, JSON)
 - Sauvegarde/chargement des scans
 - Amélioration du scoring (expected return pondéré, Sharpe ratio du P&L)
