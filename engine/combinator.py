@@ -270,6 +270,7 @@ def generate_combinations(
                     contract_symbol=contract.contract_symbol,
                     volume=contract.volume,
                     open_interest=contract.open_interest,
+                    div_yield=contract.div_yield,
                 ))
 
             if not all(constraint(legs) for constraint in template.constraints):

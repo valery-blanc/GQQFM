@@ -162,7 +162,7 @@ class TestCombinatorEventsSweetZone:
         combos = generate_combinations(CALENDAR_STRANGLE, chain, event_calendar=cal)
         assert len(combos) > 0
         assert all(c.event_score_factor == pytest.approx(1.05) for c in combos)
-        assert all("FOMC Decision" in c.events_in_sweet_zone for c in combos)
+        assert all(any("FOMC Decision" in name for name in c.events_in_sweet_zone) for c in combos)
 
 
 class TestCombinatorEventsDangerZone:

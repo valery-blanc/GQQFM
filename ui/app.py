@@ -310,7 +310,9 @@ def main():
     st.markdown("---")
 
     # Détails de la combinaison
-    render_combo_detail(combo, m)
+    symbols = results.get("symbols")
+    combo_symbol = symbols[idx] if symbols else (results.get("symbol") or None)
+    render_combo_detail(combo, m, symbol=combo_symbol)
 
 
 if __name__ == "__main__":

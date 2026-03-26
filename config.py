@@ -4,8 +4,8 @@
 DEFAULT_RISK_FREE_RATE: float = 0.045  # 4.5%
 
 # Grille de spots pour le calcul P&L
-SPOT_RANGE_LOW: float = 0.85   # spot × 85%
-SPOT_RANGE_HIGH: float = 1.15  # spot × 115%
+SPOT_RANGE_LOW: float = 0.75   # spot × 75% (couvre strikes ±20% + marge)
+SPOT_RANGE_HIGH: float = 1.25  # spot × 125%
 NUM_SPOT_POINTS: int = 200
 
 # Scénarios de volatilité par défaut

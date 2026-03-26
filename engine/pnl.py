@@ -4,7 +4,7 @@ import numpy as np
 
 import config
 from engine.backend import xp, to_xp
-from engine.black_scholes import bs_price, intrinsic_value
+from engine.black_scholes import bs_american_price, bs_price, intrinsic_value
 
 
 def compute_batch_size(num_spots: int, num_vol_scenarios: int, num_legs: int = 4) -> int:
@@ -36,6 +36,7 @@ def combinations_to_tensor(combinations: list) -> dict:
     entry_prices = np.zeros((C, L), dtype=np.float32)
     implied_vols = np.zeros((C, L), dtype=np.float32)
     tte_at_close = np.zeros((C, L), dtype=np.float32)
+    div_yields = np.zeros((C, L), dtype=np.float32)
 
     for i, combo in enumerate(combinations):
         for j, leg in enumerate(combo.legs):
@@ -47,6 +48,7 @@ def combinations_to_tensor(combinations: list) -> dict:
             implied_vols[i, j] = leg.implied_vol
             tte_days = max(0, (leg.expiration - combo.close_date).days)
             tte_at_close[i, j] = tte_days / 365.0
+            div_yields[i, j] = leg.div_yield
 
     return {
         "option_types": to_xp(option_types),
@@ -56,6 +58,7 @@ def combinations_to_tensor(combinations: list) -> dict:
         "entry_prices": to_xp(entry_prices),
         "implied_vols": to_xp(implied_vols),
         "time_to_expiry_at_close": to_xp(tte_at_close),
+        "div_yields": to_xp(div_yields),
     }
 
 
@@ -119,6 +122,7 @@ def _compute_pnl_batch_chunk(
     entry_prices = batch["entry_prices"][None, :, :]  # (1, C, 4)
     implied_vols = batch["implied_vols"][None, :, :]  # (1, C, 4)
     tte = batch["time_to_expiry_at_close"][None, :, :]  # (1, C, 4)
+    div_yields = batch["div_yields"][None, :, :].astype(xp.float32)  # (1, C, 4)
 
     expired_mask = (tte <= 0.0)   # legs expirés à close_date
 
@@ -129,10 +133,10 @@ def _compute_pnl_batch_chunk(
 
         # Valeur BS pour legs vivants (tte > 0)
         # Eviter division par zéro : clip tte à un minimum
-        safe_tte = xp.where(expired_mask, xp.ones_like(tte) * 1e-6, tte)
-        safe_vol = xp.where(adjusted_vol <= 0, xp.ones_like(adjusted_vol) * 1e-6, adjusted_vol)
+        safe_tte = xp.where(expired_mask, 1e-6, tte)
+        safe_vol = xp.clip(adjusted_vol, 1e-6, None)
 
-        bs_val = bs_price(opt_types, spot_2d, strikes, safe_tte, safe_vol, rate)  # (M, C, 4)
+        bs_val = bs_american_price(opt_types, spot_2d, strikes, safe_tte, safe_vol, rate, div_yields)  # (M, C, 4)
         intr_val = intrinsic_value(opt_types, spot_2d, strikes)                    # (M, C, 4)
 
         # Sélectionner valeur selon expiration

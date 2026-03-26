@@ -122,6 +122,14 @@ class YFinanceProvider:
         info = ticker.fast_info
         underlying_price = float(info.last_price)
 
+        # Dividend yield continu annualisé (0.0 si non disponible)
+        try:
+            full_info = ticker.info
+            raw_yield = full_info.get("dividendYield") or full_info.get("trailingAnnualDividendYield")
+            div_yield = float(raw_yield) if raw_yield else 0.0
+        except Exception:
+            div_yield = 0.0
+
         today = date.today()
         if min_expiry is None:
             min_expiry = today + timedelta(days=config.MIN_DAYS_TO_EXPIRY)
@@ -238,6 +246,7 @@ class YFinanceProvider:
                     volume=volume,
                     open_interest=oi,
                     delta=delta,
+                    div_yield=div_yield,
                 ))
 
         expirations = sorted(set(c.expiration for c in contracts))
@@ -246,6 +255,7 @@ class YFinanceProvider:
         return OptionsChain(
             underlying_symbol=symbol.upper(),
             underlying_price=underlying_price,
+            div_yield=div_yield,
             contracts=contracts,
             expirations=expirations,
             strikes=strikes,

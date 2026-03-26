@@ -139,3 +139,33 @@
 - [x] tests/test_select_event_pairs.py — 6 tests (Tests 1-6)
 - [x] docs/specs/FEAT-006-scanner-events.md — statut DONE
 - [x] docs/specs/option_scanner_spec_v2.md — mise à jour section 5, version FEAT-006
+
+## FEAT-007 — Améliorations UI (Events dates, Finnhub indicator, API key file)
+
+- [x] ui/components/results_table.py — colonne Events avec dates DD/MM
+- [x] ui/components/sidebar.py — indicateur Finnhub dans section GPU Info
+- [x] events/calendar.py — resolve_api_key() : paramètre > env var > finnhub.key > config.py
+- [x] finnhub.key — fichier de clé API
+
+## FEAT-008 — Pricing américain Bjerksund-Stensland 1993
+
+- [x] data/models.py — div_yield dans OptionContract, OptionsChain, Leg
+- [x] data/provider_yfinance.py — fetch dividendYield depuis ticker.info
+- [x] engine/combinator.py — propagation div_yield dans les Legs
+- [x] engine/pnl.py — tenseur div_yields + wiring vers bs_american_price
+- [x] engine/black_scholes.py — _bs93_phi, _bs93_american_call, bs_american_price (put-call transformation)
+- [x] tests/test_black_scholes.py — 8 tests américains (intrinsèque, vectorisé, bounds)
+- [x] tests/test_combinator_events.py — fix test sweet_zone (format dates DD/MM)
+
+## RECO-1 — Grille spot élargie ±25%
+
+- [x] config.py — SPOT_RANGE_LOW=0.75, SPOT_RANGE_HIGH=1.25
+
+## RECO-2 — Warning ex-dividende dans combo_detail
+
+- [x] ui/components/combo_detail.py — _check_ex_div_warning + paramètre symbol
+- [x] ui/app.py — passage symbol à render_combo_detail
+
+## RECO-3 — Micro-optimisation xp.clip dans pnl.py
+
+- [x] engine/pnl.py — safe_tte et safe_vol optimisés

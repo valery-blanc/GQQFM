@@ -18,6 +18,7 @@ class OptionContract:
     volume: int
     open_interest: int
     delta: float | None = None
+    div_yield: float = 0.0         # rendement de dividende continu annualisé
 
 
 @dataclass
@@ -29,6 +30,7 @@ class OptionsChain:
     expirations: list[date]
     strikes: list[float]
     fetch_timestamp: datetime
+    div_yield: float = 0.0         # rendement de dividende continu annualisé
 
 
 @dataclass
@@ -44,6 +46,7 @@ class Leg:
     contract_symbol: str = ""
     volume: int = 0
     open_interest: int = 0
+    div_yield: float = 0.0         # rendement de dividende continu annualisé
 
 
 @dataclass

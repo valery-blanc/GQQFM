@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : PERF-001 (2026-03-26)
+> Version : FEAT-008 (2026-03-26)
 
 ## 1. Vue d'ensemble
 
@@ -498,40 +498,37 @@ def get_device_info() -> dict:
 - Un fichier test_gpu.py optionnel (marqué `@pytest.mark.gpu`) vérifie
   la cohérence des résultats GPU vs CPU (tolérance 1e-5).
 
-### 5.2 Black-Scholes vectorisé sur GPU
+### 5.2 Pricing américain Bjerksund-Stensland 1993 (FEAT-008)
+
+Le pricer utilise l'approximation analytique de Bjerksund-Stensland 1993 pour
+les options américaines, qui tient compte de la prime d'exercice anticipé :
+
+- **Calls sans dividende (q ≈ 0)** : retourne le prix Black-Scholes européen
+  (exercice anticipé jamais optimal sans dividende).
+- **Calls avec dividende (q > 0)** : approximation B-S 1993 avec frontière
+  d'exercice plate et 6 appels à la fonction φ auxiliaire.
+- **Puts** : transformation put-call P(S,K,T,r,q,σ) = C(K,S,T,q,r,σ).
+- **Plancher** : max(valeur américaine, valeur intrinsèque).
+
+Le rendement de dividende continu (`div_yield`) est récupéré automatiquement
+depuis Yahoo Finance (`ticker.info["dividendYield"]`) et propagé dans chaque
+Leg puis dans le tenseur GPU.
 
 ```python
-from engine.backend import xp, ndtr
-
-def bs_price_gpu(
-    option_type: xp.ndarray,   # 0 = call, 1 = put, shape (N,)
-    spot: xp.ndarray,          # prix du sous-jacent, shape (N,) ou (M,)
-    strike: xp.ndarray,        # prix d'exercice, shape (N,)
-    time_to_expiry: xp.ndarray,# en années, shape (N,)
-    vol: xp.ndarray,           # volatilité implicite, shape (N,)
-    rate: float,               # taux sans risque
+def bs_american_price(
+    option_type, spot, strike, time_to_expiry, vol, rate, div_yield
 ) -> xp.ndarray:
-    """
-    Calcul Black-Scholes vectorisé sur GPU.
+    """Prix américain B-S 1993, entièrement vectorisé GPU."""
+```
 
-    Pour le broadcast spot × combinaisons :
-    - spot: shape (M, 1) = grille de prix simulés
-    - strike, time_to_expiry, vol: shape (1, N) = paramètres des legs
-    - Résultat: shape (M, N) = prix de chaque leg pour chaque spot
+Le pricing européen classique (`bs_price`) reste disponible comme référence
+mais n'est plus utilisé dans le pipeline P&L principal.
 
-    Retourne les prix des options (valeur théorique).
-    """
-    d1 = (xp.log(spot / strike) + (rate + 0.5 * vol**2) * time_to_expiry) / (vol * xp.sqrt(time_to_expiry))
-    d2 = d1 - vol * xp.sqrt(time_to_expiry)
+### 5.2.1 Black-Scholes européen (référence)
 
-    call_price = spot * ndtr(d1) - strike * xp.exp(-rate * time_to_expiry) * ndtr(d2)
-    put_price = strike * xp.exp(-rate * time_to_expiry) * ndtr(-d2) - spot * ndtr(-d1)
-
-    # Sélection call/put via masque
-    is_call = (option_type == 0)
-    price = xp.where(is_call, call_price, put_price)
-
-    return price
+```python
+def bs_price(option_type, spot, strike, time_to_expiry, vol, rate) -> xp.ndarray:
+    """Black-Scholes européen vectorisé. Utilisé comme fallback pour calls sans dividende."""
 ```
 
 ### 5.3 Calcul P&L batch sur GPU
