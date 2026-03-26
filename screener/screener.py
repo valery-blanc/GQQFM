@@ -13,6 +13,7 @@ Pipeline :
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from typing import Callable
 
@@ -20,7 +21,7 @@ import config
 from events.calendar import EventCalendar
 from screener.event_filter import filter_by_events
 from screener.models import OptionsMetrics, ScreenerResult
-from screener.options_analyzer import analyze_ticker
+from screener.options_analyzer import analyze_ticker, batch_compute_hv30
 from screener.scorer import check_disqualification, compute_score, to_screener_result
 from screener.stock_filter import fast_filter_stocks
 from screener.universe import UNIVERSE
@@ -110,15 +111,17 @@ class UnderlyingScreener:
         all_metrics: list[OptionsMetrics] = []
         n = len(candidates)
 
-        for i, sym in enumerate(candidates):
-            pct = 35.0 + (i / max(n, 1)) * 55.0
-            _progress(pct, f"Analyse {sym} ({i + 1}/{n})…")
+        # Batch HV30 : 1 requête yfinance pour tous les tickers
+        _progress(35.0, f"HV30 batch ({n} tickers)…")
+        hv30_map = batch_compute_hv30(candidates)
+        _progress(40.0, "HV30 calculé")
 
+        # Analyse parallèle (ThreadPoolExecutor — délai par thread, pas global)
+        def _analyze_one(sym: str) -> OptionsMetrics | None:
             spot = prices.get(sym, 0.0)
             if spot <= 0:
-                continue
-
-            metrics = analyze_ticker(
+                return None
+            return analyze_ticker(
                 symbol=sym,
                 spot_price=spot,
                 event_calendar=cal,
@@ -126,18 +129,30 @@ class UnderlyingScreener:
                 far_range=far_expiry_range,
                 next_earnings_date=earnings_dates.get(sym),
                 next_ex_div_date=ex_div_dates.get(sym),
+                hv30_precomputed=hv30_map.get(sym),
             )
-            if metrics is None:
-                continue
 
-            # Filtre éliminatoire
-            reason = check_disqualification(metrics)
-            if reason:
-                metrics.disqualification_reason = reason
-                logger.debug("Éliminé %s : %s", sym, reason)
-                continue
+        completed = 0
+        with ThreadPoolExecutor(max_workers=config.SCREENER_MAX_WORKERS) as executor:
+            future_to_sym = {executor.submit(_analyze_one, sym): sym for sym in candidates}
+            for future in as_completed(future_to_sym):
+                completed += 1
+                sym = future_to_sym[future]
+                pct = 40.0 + (completed / max(n, 1)) * 50.0
+                _progress(pct, f"Analysé {sym} ({completed}/{n})…")
 
-            all_metrics.append(metrics)
+                metrics = future.result()
+                if metrics is None:
+                    continue
+
+                # Filtre éliminatoire (thread principal — pas d'écriture concurrente)
+                reason = check_disqualification(metrics)
+                if reason:
+                    metrics.disqualification_reason = reason
+                    logger.debug("Éliminé %s : %s", sym, reason)
+                    continue
+
+                all_metrics.append(metrics)
 
         _progress(90.0, f"{len(all_metrics)} tickers qualifiés, calcul du score…")
 

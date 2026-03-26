@@ -67,6 +67,40 @@ def select_expirations(
 
 # ── HV30 ─────────────────────────────────────────────────────────────────────
 
+def batch_compute_hv30(symbols: list[str]) -> dict[str, float]:
+    """
+    Télécharge l'historique de tous les symboles en un seul appel yfinance.
+    Retourne {symbol: hv30} — 0.0 si données insuffisantes.
+    """
+    import yfinance as yf
+    if not symbols:
+        return {}
+    try:
+        data = yf.download(
+            symbols, period="3mo", interval="1d",
+            progress=False, auto_adjust=True,
+        )
+        result: dict[str, float] = {}
+        for sym in symbols:
+            try:
+                closes = (
+                    data["Close"].squeeze().dropna()
+                    if len(symbols) == 1
+                    else data["Close"][sym].dropna()
+                )
+                if len(closes) < 22:
+                    result[sym] = 0.0
+                    continue
+                log_returns = np.log(closes / closes.shift(1)).dropna()
+                result[sym] = float(log_returns.tail(21).std() * math.sqrt(252))
+            except Exception:
+                result[sym] = 0.0
+        return result
+    except Exception as exc:
+        logger.debug("batch HV30 : %s", exc)
+        return {sym: 0.0 for sym in symbols}
+
+
 def compute_hv30(symbol: str) -> float:
     """
     Volatilité historique annualisée sur 21 jours de trading (~30 jours calendrier).
@@ -214,6 +248,7 @@ def analyze_ticker(
     next_earnings_date: date | None = None,
     next_ex_div_date: date | None = None,
     request_delay: float = config.SCREENER_REQUEST_DELAY,
+    hv30_precomputed: float | None = None,
 ) -> OptionsMetrics | None:
     """
     Analyse complète d'un ticker (étape 5 du pipeline).
@@ -255,9 +290,12 @@ def analyze_ticker(
         iv_near = get_atm_iv(near_calls, spot_price, expiry=near_exp, today=today)
         iv_far = get_atm_iv(far_calls, spot_price, expiry=far_exp, today=today)
 
-        # HV30
-        hv30 = compute_hv30(symbol)
-        time.sleep(request_delay)
+        # HV30 — utilise la valeur pré-calculée si disponible (évite 1 requête yfinance)
+        if hv30_precomputed is not None:
+            hv30 = hv30_precomputed
+        else:
+            hv30 = compute_hv30(symbol)
+            time.sleep(request_delay)
 
         # IV Rank proxy : clip((IV/HV - 0.6) / 1.2 * 100, 0, 100)
         if hv30 > 0:

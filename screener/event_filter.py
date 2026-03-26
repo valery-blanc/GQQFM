@@ -6,6 +6,7 @@ Les ETFs passent toujours ce filtre (pas d'earnings).
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 
 import config
@@ -59,6 +60,13 @@ def get_ex_div_date(symbol: str) -> date | None:
         return None
 
 
+def _fetch_events(sym: str) -> tuple[str, date | None, date | None]:
+    """Récupère earnings + ex-div pour un ticker (appelé en parallèle)."""
+    if sym in ETFS:
+        return sym, None, get_ex_div_date(sym)
+    return sym, get_earnings_date(sym), get_ex_div_date(sym)
+
+
 def filter_by_events(
     symbols: list[str],
     near_max_days: int,
@@ -67,6 +75,7 @@ def filter_by_events(
     """
     Élimine les tickers avec earnings dans [today, near_max + buffer].
     Les ETFs passent toujours.
+    Les requêtes yfinance sont parallélisées via ThreadPoolExecutor.
 
     Retourne:
         passed          : tickers retenus
@@ -74,27 +83,24 @@ def filter_by_events(
         ex_div_dates    : {symbol: next_ex_div_date | None}
     """
     cutoff = date.today() + timedelta(days=near_max_days + earnings_buffer)
-    passed: list[str] = []
     earnings_dates: dict[str, date | None] = {}
     ex_div_dates: dict[str, date | None] = {}
 
+    # Fetch parallèle (chaque thread respecte son propre rate-limit yfinance)
+    with ThreadPoolExecutor(max_workers=config.SCREENER_MAX_WORKERS) as executor:
+        futures = {executor.submit(_fetch_events, sym): sym for sym in symbols}
+        for future in as_completed(futures):
+            sym, ed, xd = future.result()
+            earnings_dates[sym] = ed
+            ex_div_dates[sym] = xd
+
+    # Reconstruction dans l'ordre original + filtrage earnings
+    passed: list[str] = []
     for sym in symbols:
-        # Les ETFs n'ont pas d'earnings → toujours retenus
-        if sym in ETFS:
-            passed.append(sym)
-            earnings_dates[sym] = None
-            ex_div_dates[sym] = get_ex_div_date(sym)
-            continue
-
-        ed = get_earnings_date(sym)
-        xd = get_ex_div_date(sym)
-        earnings_dates[sym] = ed
-        ex_div_dates[sym] = xd
-
-        if ed is not None and date.today() <= ed <= cutoff:
+        ed = earnings_dates[sym]
+        if sym not in ETFS and ed is not None and date.today() <= ed <= cutoff:
             logger.debug("Éliminé %s : earnings le %s (trop proche)", sym, ed)
             continue
-
         passed.append(sym)
 
     logger.info(
