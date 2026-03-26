@@ -24,34 +24,40 @@ def _select_event_pairs(
     """
     Sélectionne les meilleures paires d'expirations selon le profil événementiel.
 
-    - near dans SCANNER_NEAR_EXPIRY_RANGE
-    - far dans SCANNER_FAR_EXPIRY_RANGE
-    - far - near >= 10 jours
-    - Exclut les paires avec CRITICAL en danger zone
-    - Retourne les top_n paires triées par event_score_factor décroissant.
+    Considère TOUTES les paires valides (far - near >= 10 jours) depuis
+    les expirations disponibles dans la chaîne. Cela inclut toujours la paire
+    (expirations[0], expirations[-1]) qui était utilisée avant FEAT-005,
+    garantissant la rétro-compatibilité.
 
+    Priorité : paires sans CRITICAL en danger zone. Si toutes ont CRITICAL,
+    les inclut quand même (le facteur bas les pénalise au scoring sans les bloquer).
+
+    Retourne les top_n paires triées par event_score_factor décroissant.
     Retourne une liste de (near_exp, far_exp, factor, sweet_names).
     """
-    today = chain.fetch_timestamp.date()
-    near_min, near_max = config.SCANNER_NEAR_EXPIRY_RANGE
-    far_min, far_max = config.SCANNER_FAR_EXPIRY_RANGE
+    safe_pairs: list[tuple[date, date, float, list[str]]] = []
+    critical_pairs: list[tuple[date, date, float, list[str]]] = []
 
-    near_candidates = [e for e in expirations if near_min <= (e - today).days <= near_max]
-    far_candidates = [e for e in expirations if far_min <= (e - today).days <= far_max]
-
-    pairs: list[tuple[date, date, float, list[str]]] = []
-    for near in near_candidates:
-        for far in far_candidates:
+    for i in range(len(expirations)):
+        for j in range(i + 1, len(expirations)):
+            near, far = expirations[i], expirations[j]
             if (far - near).days < 10:
                 continue
             profile = event_calendar.classify_events_for_pair(near, far)
-            if profile["has_critical_in_danger"]:
-                continue
             sweet_names = [ev.name for ev in profile["sweet_zone"]]
-            pairs.append((near, far, profile["event_score_factor"], sweet_names))
+            entry = (near, far, profile["event_score_factor"], sweet_names)
+            if profile["has_critical_in_danger"]:
+                critical_pairs.append(entry)
+            else:
+                safe_pairs.append(entry)
 
-    pairs.sort(key=lambda x: -x[2])
-    return pairs[:top_n]
+    if safe_pairs:
+        safe_pairs.sort(key=lambda x: -x[2])
+        return safe_pairs[:top_n]
+    # Toutes les paires ont CRITICAL en danger zone — les inclure quand même
+    # (facteur < 1.0 les pénalise au scoring, mais évite un résultat vide)
+    critical_pairs.sort(key=lambda x: -x[2])
+    return critical_pairs[:top_n]
 
 
 def generate_combinations(
