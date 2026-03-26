@@ -45,7 +45,7 @@ def _select_event_pairs(
 
     def classify(near: date, far: date):
         profile = event_calendar.classify_events_for_pair(near, far)
-        sweet_names = [ev.name for ev in profile["sweet_zone"]]
+        sweet_names = [f"{ev.name} {ev.date.strftime('%d/%m')}" for ev in profile["sweet_zone"]]
         return profile["event_score_factor"], sweet_names, profile["has_critical_in_danger"]
 
     def build_pairs(near_candidates, far_candidates, warning_fn=None):
@@ -187,7 +187,7 @@ def generate_combinations(
         if event_calendar is not None:
             for near, far in expiry_pairs:
                 profile = event_calendar.classify_events_for_pair(near, far)
-                sweet_names = [ev.name for ev in profile["sweet_zone"]]
+                sweet_names = [f"{ev.name} {ev.date.strftime('%d/%m')}" for ev in profile["sweet_zone"]]
                 pair_event_info[(near, far)] = (profile["event_score_factor"], sweet_names, None)
 
     else:

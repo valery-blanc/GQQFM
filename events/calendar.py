@@ -26,13 +26,30 @@ class EventCalendar:
         info = cal.classify_events_for_pair(near_expiry, far_expiry)
     """
 
+    @staticmethod
+    def resolve_api_key(override: str | None = None) -> str | None:
+        """
+        Résout la clé API Finnhub depuis (par ordre de priorité) :
+        1. Paramètre direct
+        2. Variable d'environnement FINNHUB_API_KEY
+        3. Fichier finnhub.key à la racine du projet (si contenu ≠ "XXXX")
+        4. config.FINNHUB_API_KEY
+        Retourne None si aucune clé valide n'est trouvée.
+        """
+        if override:
+            return override
+        env_key = os.environ.get("FINNHUB_API_KEY")
+        if env_key:
+            return env_key
+        key_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "finnhub.key")
+        if os.path.isfile(key_file):
+            val = open(key_file).read().strip()
+            if val and val != "XXXX":
+                return val
+        return config.FINNHUB_API_KEY or None
+
     def __init__(self, finnhub_api_key: str | None = None) -> None:
-        # Priorité : paramètre > variable d'env > config.py
-        self._api_key = (
-            finnhub_api_key
-            or os.environ.get("FINNHUB_API_KEY")
-            or config.FINNHUB_API_KEY
-        )
+        self._api_key = self.resolve_api_key(finnhub_api_key)
         self._events: list[MarketEvent] = []
         self._loaded = False
 

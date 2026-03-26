@@ -187,6 +187,12 @@ def render_sidebar() -> dict:
     else:
         st.sidebar.caption("Pas de GPU — mode CPU (NumPy)")
 
+    from events.calendar import EventCalendar
+    if EventCalendar.resolve_api_key():
+        st.sidebar.caption("Finnhub: ✓ clé API active")
+    else:
+        st.sidebar.caption("Finnhub: ✗ FOMC statiques uniquement")
+
     criteria = ScoringCriteria(
         max_loss_pct=max_loss_pct,
         max_loss_probability_pct=max_loss_prob,
