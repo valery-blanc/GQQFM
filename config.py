@@ -61,7 +61,7 @@ SCREENER_PENALTY_BACKWARDATION: float = 0.7
 
 # ── Scanner expiry ranges (sélection de paires événementielles) ──
 SCANNER_NEAR_EXPIRY_RANGE: tuple = (5, 21)    # jours avant expiration near
-SCANNER_FAR_EXPIRY_RANGE: tuple = (25, 70)    # jours avant expiration far
+SCANNER_FAR_EXPIRY_RANGE: tuple = (25, 90)    # jours avant expiration far
 
 # EventCalendar
 FINNHUB_API_KEY: str | None = None  # override via env var FINNHUB_API_KEY
