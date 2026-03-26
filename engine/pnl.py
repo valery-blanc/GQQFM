@@ -67,6 +67,7 @@ def compute_pnl_batch(
     spot_range: "xp.ndarray",    # shape (M,)
     vol_scenarios: list[float],   # ex: [0.8, 1.0, 1.2]
     risk_free_rate: float,
+    use_american_pricer: bool = True,
 ) -> "xp.ndarray":
     """
     Calcule le P&L de toutes les combinaisons sur une grille de spots.
@@ -76,6 +77,9 @@ def compute_pnl_batch(
 
     Le traitement est fait par batches si nécessaire pour respecter
     la contrainte mémoire GPU.
+
+    use_american_pricer : True → Bjerksund-Stensland 1993 (défaut),
+                          False → Black-Scholes européen classique.
     """
     C = combinations_tensor["option_types"].shape[0]
     M = spot_range.shape[0]
@@ -91,7 +95,7 @@ def compute_pnl_batch(
         batch_end = min(batch_start + batch_size, C)
         batch = {k: v[batch_start:batch_end] for k, v in combinations_tensor.items()}
         result[:, batch_start:batch_end, :] = _compute_pnl_batch_chunk(
-            batch, spot_range, vol_scenarios, risk_free_rate
+            batch, spot_range, vol_scenarios, risk_free_rate, use_american_pricer
         )
 
     return result
@@ -102,6 +106,7 @@ def _compute_pnl_batch_chunk(
     spot_range: "xp.ndarray",   # (M,)
     vol_scenarios: list[float],
     rate: float,
+    use_american_pricer: bool = True,
 ) -> "xp.ndarray":
     """
     Calcule le P&L pour un sous-ensemble de combinaisons.
@@ -136,7 +141,10 @@ def _compute_pnl_batch_chunk(
         safe_tte = xp.where(expired_mask, 1e-6, tte)
         safe_vol = xp.clip(adjusted_vol, 1e-6, None)
 
-        bs_val = bs_american_price(opt_types, spot_2d, strikes, safe_tte, safe_vol, rate, div_yields)  # (M, C, 4)
+        if use_american_pricer:
+            bs_val = bs_american_price(opt_types, spot_2d, strikes, safe_tte, safe_vol, rate, div_yields)  # (M, C, 4)
+        else:
+            bs_val = bs_price(opt_types, spot_2d, strikes, safe_tte, safe_vol, rate)  # (M, C, 4)
         intr_val = intrinsic_value(opt_types, spot_2d, strikes)                    # (M, C, 4)
 
         # Sélectionner valeur selon expiration

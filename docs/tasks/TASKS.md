@@ -169,3 +169,8 @@
 ## RECO-3 — Micro-optimisation xp.clip dans pnl.py
 
 - [x] engine/pnl.py — safe_tte et safe_vol optimisés
+
+## BUG-005 — Choix pricer BS/américain non câblé
+
+- [x] engine/pnl.py — _compute_pnl_batch_chunk : branching bs_price / bs_american_price selon use_american_pricer
+- [x] ui/app.py — passage de params["use_american_pricer"] à compute_pnl_batch

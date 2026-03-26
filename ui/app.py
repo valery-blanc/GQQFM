@@ -75,7 +75,10 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
     tensor = combinations_to_tensor(all_combinations)
 
     # 4. Calcul P&L batch
-    pnl_tensor = compute_pnl_batch(tensor, spot_range, vol_scenarios, rfr)
+    pnl_tensor = compute_pnl_batch(
+        tensor, spot_range, vol_scenarios, rfr,
+        use_american_pricer=params.get("use_american_pricer", True),
+    )
 
     progress.progress(70, text="Filtrage...")
 

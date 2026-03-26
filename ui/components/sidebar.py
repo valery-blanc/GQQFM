@@ -162,7 +162,7 @@ def render_sidebar() -> dict:
     vol_low = st.sidebar.slider("Vol basse (×)", 0.5, 0.95, 0.8, 0.05)
     vol_high = st.sidebar.slider("Vol haute (×)", 1.05, 2.0, 1.2, 0.05)
 
-    with st.sidebar.expander("Avancé"):
+    with st.sidebar.expander("Avancé", expanded=True):
         risk_free_rate = st.number_input(
             "Taux sans risque", value=config.DEFAULT_RISK_FREE_RATE,
             min_value=0.0, max_value=0.2, step=0.005, format="%.3f"
@@ -172,6 +172,17 @@ def render_sidebar() -> dict:
             step=10_000,
             help="Réduire pour accélérer en mode CPU. GPU peut gérer 500K."
         )
+        pricer_choice = st.radio(
+            "Pricer",
+            options=["Pricer américain : Bjerksund-Stensland", "Pricer européen : Black-Scholes"],
+            index=0,
+            help=(
+                "Bjerksund-Stensland 1993 : tient compte de la prime d'exercice anticipé "
+                "et du dividende. Plus précis pour les options US.\n\n"
+                "Black-Scholes : pricer européen classique, ignore l'exercice anticipé."
+            ),
+        )
+        use_american_pricer = pricer_choice.startswith("Pricer américain")
 
     scan_clicked = st.sidebar.button("🔍 Lancer le scan", use_container_width=True)
 
@@ -210,5 +221,6 @@ def render_sidebar() -> dict:
         "vol_high": vol_high,
         "risk_free_rate": risk_free_rate,
         "max_combinations": int(max_combinations),
+        "use_american_pricer": use_american_pricer,
         "scan_clicked": scan_clicked,
     }
