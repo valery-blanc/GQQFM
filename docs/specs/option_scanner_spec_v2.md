@@ -1279,8 +1279,16 @@ event_score_factor :
 **Term structure ratio :** `iv_atm_far / iv_atm_near`
 **Pénalités :** ×0.3 ex-div, ×0.5 IV Rank>70, ×0.7 backwardation>1.15
 
-**Filtres éliminatoires :** spread>10%, volume<100, OI<500, strikes<10,
-IV=0 (hors-séance), CRITICAL en danger zone.
+**Filtres éliminatoires :** spread>10%, volume<100, OI<500 (si données dispo),
+strikes<10, IV=0, CRITICAL en danger zone.
+
+**Comportement hors-séance (BUG-004) :** quand bid=ask=0 (marché fermé),
+yfinance retourne IV≈0 et OI=0. Fallbacks appliqués :
+- **IV** : recalculée depuis `lastPrice` via approximation ATM `C_time ≈ S×σ×√(T/2π)`
+  (précision ±5%, suffisant pour le scoring relatif).
+- **OI** : quand <5% des options ont OI>0, `no_open_interest` est désactivé
+  (sentinelle `avg_oi=999_999`).
+- **Spread** : quand aucun mid valide, `spread_pct=0.0` (non pénalisé).
 
 ### 14.5 select_expirations()
 
@@ -1288,8 +1296,7 @@ Priorité : event_score_factor DESC → near≥7j préféré → écart (far-nea
 
 ### 14.6 Limitations V1
 
-- IV hors-séance = 0 (pas de fallback bisection, trop lent sur 50+ tickers)
-- Avertissement UI si marché NYSE fermé
+- Avertissement UI si marché NYSE fermé (données IV calculées depuis lastPrice hors-séance)
 - Table FOMC 2026 uniquement (mise à jour annuelle requise)
 - Clé Finnhub optionnelle (env var `FINNHUB_API_KEY`)
 

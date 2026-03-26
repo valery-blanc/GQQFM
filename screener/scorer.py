@@ -18,7 +18,11 @@ from screener.models import OptionsMetrics, ScreenerResult
 DISQUALIFICATION_RULES: dict[str, callable] = {
     "spread_too_wide": lambda m: m.avg_bid_ask_spread_pct > config.SCREENER_MAX_SPREAD_PCT,
     "no_volume": lambda m: (m.avg_volume_near + m.avg_volume_far) / 2 < config.SCREENER_MIN_AVG_OPTION_VOLUME,
-    "no_open_interest": lambda m: (m.avg_oi_near + m.avg_oi_far) / 2 < config.SCREENER_MIN_AVG_OPEN_INTEREST,
+    # OI check désactivé quand les données OI sont indisponibles (valeur sentinelle 999_999)
+    "no_open_interest": lambda m: (
+        m.avg_oi_near < 999_000 and m.avg_oi_far < 999_000
+        and (m.avg_oi_near + m.avg_oi_far) / 2 < config.SCREENER_MIN_AVG_OPEN_INTEREST
+    ),
     "not_enough_strikes": lambda m: min(m.strike_count_near, m.strike_count_far) < config.SCREENER_MIN_STRIKE_COUNT,
     "iv_data_missing": lambda m: m.iv_atm_near <= 0 or m.iv_atm_far <= 0,
     "critical_event_in_near": lambda m: any(

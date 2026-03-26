@@ -92,11 +92,34 @@ def compute_hv30(symbol: str) -> float:
 
 # ── IV ATM ───────────────────────────────────────────────────────────────────
 
-def get_atm_iv(chain_df, spot: float) -> float:
+def _iv_from_last_price(last_price: float, spot: float, strike: float, T: float) -> float:
+    """
+    Estimation IV via approximation ATM : C_time ≈ S × σ × sqrt(T / (2π)).
+    Valide quand K ≈ S (strikes proches ATM).
+    Retourne 0.0 si invalide.
+    """
+    import math
+    intrinsic = max(spot - strike, 0.0)  # call intrinsic (simplified, r=0)
+    time_val = last_price - intrinsic
+    if time_val <= 0 or T <= 0:
+        return 0.0
+    iv = time_val / (spot * math.sqrt(T / (2 * math.pi)))
+    return iv if 0.02 <= iv <= 3.0 else 0.0
+
+
+def get_atm_iv(
+    chain_df,
+    spot: float,
+    expiry: "date | None" = None,
+    today: "date | None" = None,
+) -> float:
     """
     Retourne l'IV ATM depuis une chaîne d'options (DataFrame yfinance).
     Prend la médiane des 3 strikes les plus proches du spot avec IV valide.
-    Retourne 0.0 hors-séance (bid=ask=0 → IV yfinance = 0).
+
+    Fallback hors-séance : quand bid=ask=0, yfinance retourne une IV quasi-nulle.
+    Si expiry et today sont fournis, on recalcule l'IV depuis lastPrice via
+    l'approximation ATM (C_time ≈ S × σ × sqrt(T/(2π))).
     """
     import pandas as pd
     if chain_df is None or (isinstance(chain_df, pd.DataFrame) and chain_df.empty):
@@ -106,9 +129,22 @@ def get_atm_iv(chain_df, spot: float) -> float:
         df["dist"] = abs(df["strike"] - spot)
         closest = df.nsmallest(5, "dist")
         valid = closest[closest["impliedVolatility"] > 0.01]
-        if valid.empty:
+        if not valid.empty:
+            return float(valid["impliedVolatility"].median())
+
+        # Fallback : recalcul depuis lastPrice quand bid=ask=0
+        if expiry is None or today is None:
             return 0.0
-        return float(valid["impliedVolatility"].median())
+        T = max((expiry - today).days / 365.0, 1 / 365.0)
+        ivs = []
+        for _, row in closest.iterrows():
+            lp = float(row.get("lastPrice") or 0)
+            K = float(row["strike"])
+            iv = _iv_from_last_price(lp, spot, K, T)
+            if iv > 0:
+                ivs.append(iv)
+        return float(np.median(ivs)) if ivs else 0.0
+
     except Exception as exc:
         logger.debug("ATM IV : %s", exc)
         return 0.0
@@ -116,27 +152,41 @@ def get_atm_iv(chain_df, spot: float) -> float:
 
 # ── liquidité ────────────────────────────────────────────────────────────────
 
+_OI_UNAVAILABLE = 999_999.0  # Sentinelle OI : données absentes → filtre no_open_interest désactivé
+
+
 def compute_chain_liquidity(chain_df) -> tuple[float, float, float]:
     """
     Calcule les métriques de liquidité depuis une chaîne d'options.
     Retourne (avg_spread_pct, avg_volume, avg_open_interest).
+
+    Hors-séance (bid=ask=0 pour tout ou partie de la chaîne) :
+    - spread_pct = 0.0 quand aucun mid valide (non pénalisé par spread_too_wide)
+    - avg_oi = _OI_UNAVAILABLE quand <5 % des options ont OI>0 (yfinance ne
+      remonte pas l'OI après clôture) → le filtre no_open_interest est désactivé.
     """
     import pandas as pd
     if chain_df is None or (isinstance(chain_df, pd.DataFrame) and chain_df.empty):
         return 0.20, 0.0, 0.0
     try:
         df = chain_df.copy()
+        avg_volume = float(df["volume"].fillna(0).mean())
+
+        # OI : données fiables seulement si ≥ 5% des options ont OI > 0
+        oi_series = df["openInterest"].fillna(0)
+        if len(oi_series) > 0 and (oi_series > 0).mean() >= 0.05:
+            avg_oi = float(oi_series.mean())
+        else:
+            avg_oi = _OI_UNAVAILABLE  # yfinance OI non disponible → skip filtre
+
         # Spread bid-ask en % du mid
         mid = (df["bid"] + df["ask"]) / 2
         valid_mid = mid[mid > 0]
         if valid_mid.empty:
-            spread_pct = 0.20
-        else:
-            spread = df.loc[valid_mid.index, "ask"] - df.loc[valid_mid.index, "bid"]
-            spread_pct = float((spread / valid_mid).median())
+            return 0.0, avg_volume, avg_oi
+        spread = df.loc[valid_mid.index, "ask"] - df.loc[valid_mid.index, "bid"]
+        spread_pct = float((spread / valid_mid).median())
 
-        avg_volume = float(df["volume"].fillna(0).mean())
-        avg_oi = float(df["openInterest"].fillna(0).mean())
         return spread_pct, avg_volume, avg_oi
     except Exception as exc:
         logger.debug("Liquidité chaîne : %s", exc)
@@ -201,9 +251,9 @@ def analyze_ticker(
         near_calls = near_chain.calls
         far_calls = far_chain.calls
 
-        # IV ATM (calls, nearest strikes)
-        iv_near = get_atm_iv(near_calls, spot_price)
-        iv_far = get_atm_iv(far_calls, spot_price)
+        # IV ATM (calls, nearest strikes) — fallback lastPrice hors-séance
+        iv_near = get_atm_iv(near_calls, spot_price, expiry=near_exp, today=today)
+        iv_far = get_atm_iv(far_calls, spot_price, expiry=far_exp, today=today)
 
         # HV30
         hv30 = compute_hv30(symbol)

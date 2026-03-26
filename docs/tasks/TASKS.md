@@ -113,6 +113,14 @@
 - [x] docs/specs/FEAT-005-scanner-events.md
 - [x] docs/specs/option_scanner_spec_v2.md — mise à jour section 3, 5, 8, 13
 
+## BUG-004 — Screener retourne 0 résultats hors-séance
+
+- [x] screener/options_analyzer.py — get_atm_iv : fallback IV depuis lastPrice (approximation ATM)
+- [x] screener/options_analyzer.py — compute_chain_liquidity : spread=0.0 + sentinelle OI=999_999 quand données indisponibles hors-séance
+- [x] screener/scorer.py — no_open_interest : désactivé quand OI=999_999 (sentinelle)
+- [x] docs/bugs/BUG-004-screener-zero-results-offhours.md
+- [x] docs/specs/option_scanner_spec_v2.md — section 14 screener mis à jour
+
 ## FEAT-006 — Correction du filtrage événementiel dans la sélection d'expirations
 
 - [x] engine/combinator.py — _select_event_pairs : algorithme 4 étapes (remplace fallback permissif)
