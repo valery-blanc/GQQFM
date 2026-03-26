@@ -13,15 +13,18 @@ def score_combinations(
     atm_vol: float,
     days_to_close: int,
     risk_free_rate: float,
+    event_score_factors: "xp.ndarray | None" = None,  # shape (C,), multiplicateur
 ) -> "xp.ndarray":
     """
     Score composite entre 0 et 1 pour classer les combinaisons filtrées.
 
-    Score = w1 * norm(gain_loss_ratio)
-          + w2 * (1 - norm(loss_prob))
-          + w3 * norm(expected_return)
+    Score = (w1 * norm(gain_loss_ratio)
+           + w2 * (1 - norm(loss_prob))
+           + w3 * norm(expected_return))
+           × event_score_factor
 
     Poids par défaut : 0.4, 0.3, 0.3
+    Si event_score_factors est None : factor=1.0 (rétro-compatible).
     """
     safe_debits = xp.where(net_debits == 0, xp.ones_like(net_debits) * 1e-6, net_debits)
 
@@ -54,6 +57,9 @@ def score_combinations(
         + config.SCORE_WEIGHT_LOSS_PROB * (1.0 - norm(loss_prob))
         + config.SCORE_WEIGHT_EXPECTED_RETURN * norm(expected_return)
     )
+
+    if event_score_factors is not None:
+        score = score * event_score_factors
 
     return score
 

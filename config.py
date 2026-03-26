@@ -59,6 +59,10 @@ SCREENER_PENALTY_EX_DIV: float = 0.3
 SCREENER_PENALTY_HIGH_IV_RANK: float = 0.5
 SCREENER_PENALTY_BACKWARDATION: float = 0.7
 
+# ── Scanner expiry ranges (sélection de paires événementielles) ──
+SCANNER_NEAR_EXPIRY_RANGE: tuple = (5, 21)    # jours avant expiration near
+SCANNER_FAR_EXPIRY_RANGE: tuple = (25, 70)    # jours avant expiration far
+
 # EventCalendar
 FINNHUB_API_KEY: str | None = None  # override via env var FINNHUB_API_KEY
 EVENT_PENALTY_CRITICAL_IN_NEAR: float = 0.4

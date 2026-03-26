@@ -1,6 +1,7 @@
 """Application Streamlit principale — Options P&L Scanner."""
 
 import time
+from datetime import date, timedelta
 
 import numpy as np
 import streamlit as st
@@ -27,7 +28,7 @@ st.set_page_config(
 )
 
 
-def run_scan(params: dict, symbol: str) -> dict:
+def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
     """Exécute le pipeline complet pour un seul symbol et retourne les résultats."""
     criteria = params["criteria"]
     vol_scenarios = [params["vol_low"], 1.0, params["vol_high"]]
@@ -51,6 +52,7 @@ def run_scan(params: dict, symbol: str) -> dict:
         template = ALL_TEMPLATES[tmpl_name]
         combos = generate_combinations(
             template, chain,
+            event_calendar=event_calendar,
             max_combinations=max_combinations,
             min_volume=criteria.min_avg_volume,
             max_net_debit=criteria.max_net_debit,
@@ -127,9 +129,15 @@ def run_scan(params: dict, symbol: str) -> dict:
     pnl_mid_filtered = pnl_filtered[config.VOL_MEDIAN_INDEX]  # (C_f, M)
     net_debits_f = net_debits[valid_indices]
 
+    event_factors = xp.array(
+        [all_combinations[i].event_score_factor for i in valid_indices_cpu],
+        dtype=xp.float32,
+    )
+
     scores = score_combinations(
         pnl_mid_filtered, net_debits_f, spot_range,
         spot, atm_vol, days_to_close, rfr,
+        event_score_factors=event_factors,
     )
     scores_cpu = to_cpu(scores)
 
@@ -181,8 +189,19 @@ def run_multi_scan(params: dict) -> dict:
     all_entries = []
     n_tested_total = 0
 
+    # Chargement unique du calendrier événementiel (une seule requête Finnhub)
+    from events.calendar import EventCalendar
+    event_calendar = EventCalendar()
+    try:
+        event_calendar.load(
+            from_date=date.today(),
+            to_date=date.today() + timedelta(days=config.SCANNER_FAR_EXPIRY_RANGE[1] + 7),
+        )
+    except Exception:
+        event_calendar = None
+
     for symbol in symbols:
-        result = run_scan(params, symbol)
+        result = run_scan(params, symbol, event_calendar=event_calendar)
         if "error" in result:
             continue
         n_tested_total += result["n_tested"]

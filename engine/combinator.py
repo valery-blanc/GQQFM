@@ -1,16 +1,63 @@
 """Génération de combinaisons d'options par template."""
 
+from __future__ import annotations
+
+from datetime import date
 from itertools import product
+from typing import TYPE_CHECKING
 
 from data.models import Combination, Leg, OptionsChain
 from templates.base import TemplateDefinition
 
 import config
 
+if TYPE_CHECKING:
+    from events.calendar import EventCalendar
+
+
+def _select_event_pairs(
+    expirations: list[date],
+    chain: OptionsChain,
+    event_calendar: EventCalendar,
+    top_n: int = 3,
+) -> list[tuple[date, date, float, list[str]]]:
+    """
+    Sélectionne les meilleures paires d'expirations selon le profil événementiel.
+
+    - near dans SCANNER_NEAR_EXPIRY_RANGE
+    - far dans SCANNER_FAR_EXPIRY_RANGE
+    - far - near >= 10 jours
+    - Exclut les paires avec CRITICAL en danger zone
+    - Retourne les top_n paires triées par event_score_factor décroissant.
+
+    Retourne une liste de (near_exp, far_exp, factor, sweet_names).
+    """
+    today = chain.fetch_timestamp.date()
+    near_min, near_max = config.SCANNER_NEAR_EXPIRY_RANGE
+    far_min, far_max = config.SCANNER_FAR_EXPIRY_RANGE
+
+    near_candidates = [e for e in expirations if near_min <= (e - today).days <= near_max]
+    far_candidates = [e for e in expirations if far_min <= (e - today).days <= far_max]
+
+    pairs: list[tuple[date, date, float, list[str]]] = []
+    for near in near_candidates:
+        for far in far_candidates:
+            if (far - near).days < 10:
+                continue
+            profile = event_calendar.classify_events_for_pair(near, far)
+            if profile["has_critical_in_danger"]:
+                continue
+            sweet_names = [ev.name for ev in profile["sweet_zone"]]
+            pairs.append((near, far, profile["event_score_factor"], sweet_names))
+
+    pairs.sort(key=lambda x: -x[2])
+    return pairs[:top_n]
+
 
 def generate_combinations(
     template: TemplateDefinition,
     chain: OptionsChain,
+    event_calendar: EventCalendar | None = None,
     max_combinations: int = config.MAX_COMBINATIONS,
     min_volume: int = 0,
     max_net_debit: float = float("inf"),
@@ -19,9 +66,16 @@ def generate_combinations(
     """
     Génère toutes les combinaisons valides pour un template donné.
 
-    Si use_adjacent_expiry_pairs=True, itère sur toutes les paires d'expirations
-    séparées de 5 à 45 jours (utile pour les diagonales à expirations proches).
-    Sinon, utilise expirations[0] (NEAR) et expirations[-1] (FAR).
+    Si event_calendar est fourni et use_adjacent_expiry_pairs=False :
+      - Sélectionne les meilleures paires via _select_event_pairs (top 3).
+      - Stocke event_score_factor et events_in_sweet_zone dans chaque Combination.
+      - Fallback sur (expirations[0], expirations[-1]) si aucune paire éligible.
+
+    Si event_calendar est fourni et use_adjacent_expiry_pairs=True :
+      - Comportement adjacent existant + calcul de event_score_factor par paire.
+
+    Si event_calendar est None :
+      - Comportement identique à l'existant (rétro-compatible, factor=1.0).
     """
     expirations = sorted(chain.expirations)
     if len(expirations) < 2:
@@ -29,7 +83,10 @@ def generate_combinations(
 
     spot = chain.underlying_price
 
-    # Construire la liste des paires (near_exp, far_exp) à explorer
+    # ── Construire la liste des paires (near_exp, far_exp) avec facteurs ──────
+    # pair_event_info : (near, far) → (factor, sweet_names)
+    pair_event_info: dict[tuple[date, date], tuple[float, list[str]]] = {}
+
     if template.use_adjacent_expiry_pairs:
         expiry_pairs = [
             (expirations[i], expirations[j])
@@ -39,14 +96,36 @@ def generate_combinations(
         ]
         if not expiry_pairs:
             expiry_pairs = [(expirations[0], expirations[-1])]
+
+        if event_calendar is not None:
+            for near, far in expiry_pairs:
+                profile = event_calendar.classify_events_for_pair(near, far)
+                sweet_names = [ev.name for ev in profile["sweet_zone"]]
+                pair_event_info[(near, far)] = (profile["event_score_factor"], sweet_names)
+
     else:
-        expiry_pairs = [(expirations[0], expirations[-1])]
+        # use_adjacent_expiry_pairs=False (templates 1-3 : calendar strangle, etc.)
+        if event_calendar is not None:
+            selected = _select_event_pairs(expirations, chain, event_calendar)
+            if selected:
+                expiry_pairs = [(near, far) for near, far, _, _ in selected]
+                pair_event_info = {
+                    (near, far): (factor, sweet)
+                    for near, far, factor, sweet in selected
+                }
+            else:
+                # Fallback : première et dernière expiration, factor neutre
+                expiry_pairs = [(expirations[0], expirations[-1])]
+        else:
+            expiry_pairs = [(expirations[0], expirations[-1])]
 
     all_combos: list[Combination] = []
 
     for near_exp, far_exp in expiry_pairs:
         if len(all_combos) >= max_combinations:
             break
+
+        factor, sweet_names = pair_event_info.get((near_exp, far_exp), (1.0, []))
 
         # Candidats par leg_spec pour cette paire d'expirations
         leg_candidates: list[list[tuple]] = []
@@ -124,6 +203,8 @@ def generate_combinations(
                 net_debit=net_debit,
                 close_date=close_date,
                 template_name=template.name,
+                event_score_factor=factor,
+                events_in_sweet_zone=sweet_names,
             ))
 
             if len(all_combos) >= max_combinations:

@@ -46,6 +46,13 @@ def render_results_table(
         rows.append(row)
 
     df = pd.DataFrame(rows)
+
+    # Colonne Events — affichée seulement si au moins une combo a des événements favorables
+    if any(combo.events_in_sweet_zone for combo in combinations):
+        for i, (combo, row) in enumerate(zip(combinations, rows)):
+            row["Events"] = ", ".join(combo.events_in_sweet_zone) if combo.events_in_sweet_zone else "—"
+        df = pd.DataFrame(rows)
+
     st.subheader(f"Résultats — {len(combinations)} combinaison(s)")
 
     # Police réduite pour le tableau (notamment la colonne Legs multi-lignes)

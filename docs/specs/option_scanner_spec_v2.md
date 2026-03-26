@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-004 (2026-03-25)
+> Version : FEAT-005 (2026-03-25)
 
 ## 1. Vue d'ensemble
 
@@ -195,6 +195,11 @@ class Combination:
     close_date: date           # date de clôture = min(expiration des legs short)
                                # Déterminée AUTOMATIQUEMENT par le Combinator.
     template_name: str         # nom du template source
+    event_score_factor: float = 1.0              # multiplicateur événementiel (FEAT-005)
+                               # > 1.0 si événement favorable en sweet zone
+                               # < 1.0 si événement MODERATE en danger zone
+                               # Paires avec CRITICAL en danger zone exclues par le Combinator
+    events_in_sweet_zone: list[str] = []         # noms des événements favorables (sweet zone)
 
 @dataclass
 class TemplateDefinition:
@@ -206,7 +211,12 @@ class TemplateDefinition:
     use_adjacent_expiry_pairs: bool = False
     # Si True : le Combinator itère sur TOUTES les paires (NEAR, FAR) dont l'écart
     # est entre 5 et 45 jours. Utile pour les diagonales à expirations proches.
-    # Si False : utilise expirations[0] (NEAR) et expirations[-1] (FAR).
+    # Si False (templates 1-3) :
+    #   - Sans event_calendar : utilise expirations[0] (NEAR) et expirations[-1] (FAR).
+    #   - Avec event_calendar : sélectionne les top-3 paires par event_score_factor
+    #     parmi near ∈ SCANNER_NEAR_EXPIRY_RANGE et far ∈ SCANNER_FAR_EXPIRY_RANGE.
+    #     Paires avec CRITICAL en danger zone exclues (has_critical_in_danger=True).
+    #     Fallback sur (expirations[0], expirations[-1]) si aucune paire éligible.
 
 @dataclass
 class LegSpec:
@@ -807,11 +817,13 @@ def score_combinations(
     """
     Score composite pour classer les combinaisons filtrées.
 
-    Score = w1 * normalized_gain_loss_ratio
-          + w2 * (1 - normalized_loss_prob)
-          + w3 * normalized_expected_return
+    Score = (w1 * normalized_gain_loss_ratio
+           + w2 * (1 - normalized_loss_prob)
+           + w3 * normalized_expected_return)
+           × event_score_factor   ← FEAT-005 : multiplicateur événementiel
 
     Les poids par défaut : w1=0.4, w2=0.3, w3=0.3
+    event_score_factor=1.0 si event_calendar non fourni (rétro-compatible).
 
     L'expected return est calculé comme l'espérance du P&L pondéré par la
     distribution log-normale du sous-jacent.
@@ -1195,6 +1207,7 @@ pas dans `config.py`. `config.py` ne contient que les constantes moteur.
 
 ### V2 (en cours / planifié)
 - ✅ Screener automatique de sous-jacents (FEAT-004)
+- ✅ Intégration EventCalendar dans le scanner — multi-paires + event_score_factor (FEAT-005)
 - Export des résultats (CSV, JSON)
 - Sauvegarde/chargement des scans
 - Amélioration du scoring (expected return pondéré, Sharpe ratio du P&L)

@@ -145,6 +145,19 @@ def plot_pnl_profile(
         bordercolor="gray",
     )
 
+    if combination.events_in_sweet_zone:
+        events_str = ", ".join(combination.events_in_sweet_zone)
+        fig.add_annotation(
+            text=f"★ Events between expirations: {events_str}",
+            xref="paper", yref="paper",
+            x=0.02, y=0.88,
+            showarrow=False,
+            align="left",
+            font=dict(size=11, color="gold"),
+            bgcolor="rgba(0,0,0,0.6)",
+            bordercolor="rgba(255,215,0,0.5)",
+        )
+
     title_legs = " | ".join(
         f"{'L' if leg.direction == 1 else 'S'}{leg.quantity} "
         f"{leg.option_type.upper()[0]} {leg.strike:.0f} "

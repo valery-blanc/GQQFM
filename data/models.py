@@ -48,13 +48,15 @@ class Leg:
 
 @dataclass
 class Combination:
-    """Une combinaison complète de 4 legs."""
-    legs: list[Leg]            # exactement 4 legs
+    """Une combinaison de 2 à 4 legs."""
+    legs: list[Leg]            # 2 à 4 legs
     net_debit: float           # coût d'entrée en dollars, ×100 INCLUS
                                # = Σ (direction × quantity × entry_price × 100)
                                # positif = débit (la position coûte de l'argent)
     close_date: date           # = min(expiration des legs short), calculé auto
     template_name: str
+    event_score_factor: float = 1.0              # multiplicateur événementiel (1.0 = neutre)
+    events_in_sweet_zone: list[str] = field(default_factory=list)  # noms des événements favorables
 
 
 @dataclass

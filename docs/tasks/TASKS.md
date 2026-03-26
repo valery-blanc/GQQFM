@@ -98,3 +98,17 @@
 ### Docs
 - [x] docs/specs/FEAT-004-screener.md
 - [x] docs/specs/option_scanner_spec_v2.md — ajout section 14 screener + version FEAT-004
+
+## FEAT-005 — Intégration EventCalendar dans le scanner
+
+- [x] data/models.py — event_score_factor + events_in_sweet_zone dans Combination
+- [x] config.py — SCANNER_NEAR_EXPIRY_RANGE + SCANNER_FAR_EXPIRY_RANGE
+- [x] engine/combinator.py — paramètre event_calendar + _select_event_pairs + multi-paires
+- [x] scoring/scorer.py — paramètre event_score_factors (multiplicateur)
+- [x] ui/app.py — chargement EventCalendar + passage event_factors au scorer
+- [x] ui/components/results_table.py — colonne Events optionnelle
+- [x] ui/components/chart.py — annotation dorée events_in_sweet_zone
+- [x] tests/test_combinator_events.py (Tests 1-5)
+- [x] tests/test_scorer_events.py (Tests 6-9)
+- [x] docs/specs/FEAT-005-scanner-events.md
+- [x] docs/specs/option_scanner_spec_v2.md — mise à jour section 3, 5, 8, 13
