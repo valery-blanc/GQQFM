@@ -113,6 +113,15 @@
 - [x] docs/specs/FEAT-005-scanner-events.md
 - [x] docs/specs/option_scanner_spec_v2.md — mise à jour section 3, 5, 8, 13
 
+## PERF-001 — Parallélisation screener
+
+- [x] config.py — SCREENER_MAX_WORKERS = 5
+- [x] screener/event_filter.py — filter_by_events parallélisé (ThreadPoolExecutor, étape 4)
+- [x] screener/options_analyzer.py — batch_compute_hv30 + hv30_precomputed dans analyze_ticker
+- [x] screener/screener.py — batch HV30 avant boucle + étape 5 parallélisée (ThreadPoolExecutor)
+- [x] docs/specs/PERF-001-screener-parallelisation.md
+- [x] docs/specs/option_scanner_spec_v2.md — section 14.2 + roadmap V2 + config
+
 ## BUG-004 — Screener retourne 0 résultats hors-séance
 
 - [x] screener/options_analyzer.py — get_atm_iv : fallback IV depuis lastPrice (approximation ATM)

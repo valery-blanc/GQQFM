@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-006 (2026-03-26)
+> Version : PERF-001 (2026-03-26)
 
 ## 1. Vue d'ensemble
 
@@ -1184,6 +1184,10 @@ MAX_COMBINATIONS: int = 500_000
 SCORE_WEIGHT_GAIN_LOSS_RATIO: float = 0.4
 SCORE_WEIGHT_LOSS_PROB: float = 0.3
 SCORE_WEIGHT_EXPECTED_RETURN: float = 0.3
+
+# ── Screener (extrait) ──
+SCREENER_REQUEST_DELAY: float = 0.5   # délai par thread (rate-limit Yahoo)
+SCREENER_MAX_WORKERS: int = 5         # threads parallèles (PERF-001)
 ```
 
 **Note :** les valeurs par défaut des filtres UI (perte max -50%, ratio G/L 0.1, etc.)
@@ -1211,6 +1215,7 @@ pas dans `config.py`. `config.py` ne contient que les constantes moteur.
 - ✅ Screener automatique de sous-jacents (FEAT-004)
 - ✅ Intégration EventCalendar dans le scanner — multi-paires + event_score_factor (FEAT-005)
 - ✅ Algorithme 4 étapes _select_event_pairs — fallback structuré + event_warning (FEAT-006)
+- ✅ Parallélisation screener — ThreadPoolExecutor + batch HV30 (~5min → ~1min) (PERF-001)
 - Export des résultats (CSV, JSON)
 - Sauvegarde/chargement des scans
 - Amélioration du scoring (expected return pondéré, Sharpe ratio du P&L)
@@ -1236,10 +1241,11 @@ résultants dans le champ de saisie, qui alimente ensuite le scanner principal.
 
 ```
 Étape 1 — Univers statique              ~128 tickers  (instantané)
-Étape 2 — Filtre stock rapide           ~128→80       (~5s, batch yfinance)
+Étape 2 — Filtre stock rapide           ~128→80       (~8s, batch yfinance)
 Étape 3 — Chargement calendrier events   enrichissement (~2s, 1 req Finnhub)
-Étape 4 — Filtre événements micro        ~80→50        (~10s, earnings/div)
-Étape 5 — Analyse options détaillée      ~50→top X     (~2min, rate limited)
+Étape 4 — Filtre événements micro        ~80→50        (~10s, parallélisé — ThreadPoolExecutor)
+Étape 5 — HV30 batch                    ~50 tickers   (~5s, 1 req yfinance multi-ticker)
+Étape 6 — Analyse options détaillée      ~50→top X     (~45s, 5 threads × rate limited)
 ```
 
 ### 14.3 Module EventCalendar (`events/`)
