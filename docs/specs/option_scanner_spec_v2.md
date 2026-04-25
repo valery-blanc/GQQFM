@@ -508,7 +508,13 @@ les options américaines, qui tient compte de la prime d'exercice anticipé :
 - **Calls avec dividende (q > 0)** : approximation B-S 1993 avec frontière
   d'exercice plate et 6 appels à la fonction φ auxiliaire.
 - **Puts** : transformation put-call P(S,K,T,r,q,σ) = C(K,S,T,q,r,σ).
-- **Plancher** : max(valeur américaine, valeur intrinsèque).
+- **Puts à r ≈ 0** (BUG-006) : retourne le put européen. Quand le taux
+  sans risque tend vers zéro, la transformation BS-1993 dégénère
+  (β → 1.0 exactement). Théorie : un put américain à taux nul n'a aucune
+  prime d'exercice anticipé (exercer maintenant donne K, mais K placé à
+  r=0 ne produit aucun intérêt) — le fallback est donc *exact*.
+- **Plancher** : max(valeur américaine, valeur intrinsèque), puis
+  garde-fou `isfinite` final (NaN éventuel d'overflow float32 → intrinsèque).
 
 Le rendement de dividende continu (`div_yield`) est récupéré automatiquement
 depuis Yahoo Finance (`ticker.info["dividendYield"]`) et propagé dans chaque

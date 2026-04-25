@@ -16,3 +16,6 @@ plotly>=5.18
 # Utils
 pandas>=2.2
 python-dateutil>=2.8
+
+# Tests (property-based)
+hypothesis>=6.100

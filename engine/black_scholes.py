@@ -96,8 +96,13 @@ def bs_american_price(
       jamais optimal).
     - Calls avec dividende : approximation B-S 1993 directe.
     - Puts : transformation put-call P(S,K,T,r,q,σ) = C(K,S,T,q,r,σ).
+    - Puts à r ≈ 0 : retourne le put européen (pas de prime d'exercice anticipé
+      quand le taux sans risque est nul ; la formule BS-1993 dégénère sinon —
+      voir BUG-006).
 
     Le résultat est toujours ≥ prix européen (floor de sécurité).
+    NaN éventuel (overflow float32 en régime extrême) est remplacé par la
+    valeur intrinsèque (borne inférieure sûre).
     """
     is_call = (option_type == 0)
 
@@ -110,15 +115,29 @@ def bs_american_price(
     call_am = xp.where(div_yield > 1e-6, call_am, euro_call)
 
     # ── Puts américains via transformation put-call ──
-    # P(S,K,T,r,q,σ) = C(K,S,T,q,r,σ) — on échange S↔K et r↔q
+    # P(S,K,T,r,q,σ) = C(K,S,T,q,r,σ) — on échange S↔K et r↔q.
+    # Quand r ≈ 0, le call transformé a r' = q et q' = r = 0. Si q ≈ 0 aussi,
+    # b' = 0 → beta = 1.0 exactement → safe_beta_m1 clampé à 1e-10 → I → ∞ →
+    # collapse numérique. Théorie : un put américain à taux nul n'a aucune
+    # prime d'exercice anticipé (le strike encaissé ne génère pas d'intérêt),
+    # donc Amer = Euro. Le fallback est exact, pas approximatif.
     put_am = _bs93_american_call(strike, spot, time_to_expiry, vol, div_yield, rate)
+    euro_put = bs_price(
+        xp.ones_like(option_type), spot, strike, time_to_expiry, vol, rate
+    )
+    rate_arr = xp.asarray(rate, dtype=xp.float32)
+    put_am = xp.where(rate_arr > 1e-6, put_am, euro_put)
 
     american = xp.where(is_call, call_am, put_am)
 
     # Plancher à la valeur intrinsèque (une option américaine vaut toujours
     # au moins sa valeur d'exercice immédiat)
     intr = intrinsic_value(option_type, spot, strike)
-    return xp.maximum(american, intr)
+    result = xp.maximum(american, intr)
+    # Garde-fou : si overflow float32 a produit NaN/Inf en régime extrême
+    # (ex. vol < 8% combinée à T long), retomber sur l'intrinsèque — borne
+    # inférieure sûre, jamais ≥ valeur correcte.
+    return xp.where(xp.isfinite(result), result, intr)
 
 
 # ── Black-Scholes européen ───────────────────────────────────────────────────

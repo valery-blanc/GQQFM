@@ -174,3 +174,25 @@
 
 - [x] engine/pnl.py — _compute_pnl_batch_chunk : branching bs_price / bs_american_price selon use_american_pricer
 - [x] ui/app.py — passage de params["use_american_pricer"] à compute_pnl_batch
+
+## FEAT-009 — Suite de tests propriétés (pricers + PnL)
+
+- [x] requirements.txt — ajout `hypothesis >= 6.100`
+- [x] tests/test_pricer_properties.py — TestEuropeanProperties (parité, bornes, monotonie)
+- [x] tests/test_pricer_properties.py — TestAmericanProperties (intrinsèque, q=0)
+- [x] tests/test_pricer_properties.py — TestDividendBoundary (sensibilité q, continuité seuil)
+- [x] tests/test_pricer_properties.py — TestPnLAttribution (inversion, linéarité, expiration)
+- [x] docs/specs/FEAT-009-pricer-properties.md
+- [x] Première exécution + analyse des findings (17 passed / 6 failed)
+- [x] BUG-006 ouvert : overflow float32 + put dégénéré quand r≈0
+
+## BUG-006 — BS-1993 overflow float32 et put dégénéré quand r ≈ 0
+
+- [x] docs/bugs/BUG-006-bs93-overflow-and-r0-degeneracy.md (status FIXED)
+- [x] engine/black_scholes.py — fallback put européen quand `rate ≤ 1e-6`
+- [x] engine/black_scholes.py — garde-fou isfinite final → intrinsèque
+- [x] tests/test_pricer_properties.py — TestZeroRateFallback (6 cas régression)
+- [x] tests/test_pricer_properties.py — domaine hypothesis resserré (vol≥0.10, r≥0.005)
+- [x] docs/specs/option_scanner_spec_v2.md — §5.2 note sur cas r ≈ 0
+- [x] pytest : 29/29 propriétés + 23/23 existants (BS, PnL) passed
+- [ ] validation utilisateur sur http://localhost:8501/, puis commit unique
