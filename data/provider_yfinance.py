@@ -105,7 +105,9 @@ class YFinanceProvider:
     """Fournisseur de données d'options via l'API Yahoo Finance."""
 
     def get_risk_free_rate(self) -> float:
-        return config.DEFAULT_RISK_FREE_RATE
+        from data.risk_free_rate import fetch_risk_free_rate
+        rate, _ = fetch_risk_free_rate()
+        return rate
 
     def get_options_chain(
         self,

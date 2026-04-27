@@ -225,4 +225,15 @@
 - [x] ui/components/sidebar.py — 2 sliders DTE dans expander Avancé
 - [x] ui/app.py — passage des plages au combinator + chargement event_calendar utilise `far_max` user
 - [x] tests/test_combinator_events.py — fix test multi-paires (passe plages explicites)
+- [x] commit 4bf6615
+
+## FEAT-012 — Live ^IRX + fix bug plages DTE strictes
+
+- [x] data/risk_free_rate.py — `fetch_risk_free_rate()` (live + fallback)
+- [x] data/provider_yfinance.py — `get_risk_free_rate` utilise le live
+- [x] ui/components/sidebar.py — `_cached_risk_free_rate` (TTL 1h) + caption source
+- [x] engine/combinator.py — `_select_event_pairs` réduit à 2 étapes (suppression extension près-min/loin-max)
+- [x] tests/test_select_event_pairs.py — `test_step2_near_extension` réécrit en `test_strict_range_no_near_extension`
+- [x] docs/specs/FEAT-012-rfr-live.md
+- [x] docs/specs/option_scanner_spec_v2.md — version + §A3
 - [ ] validation utilisateur, puis commit unique

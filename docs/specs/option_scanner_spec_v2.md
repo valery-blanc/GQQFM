@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-011 (2026-04-27)
+> Version : FEAT-012 (2026-04-27)
 
 ## 1. Vue d'ensemble
 
@@ -1374,7 +1374,7 @@ Ce tableau résume les décisions prises lors de la revue des spécifications.
 |---|----------|----------|--------|
 | A1 | **close_date** : comment est-elle déterminée ? | Automatique : `close_date = min(expiration des legs short)` pour chaque combinaison. Pré-calculée par le Combinator, encodée dans `time_to_expiry_at_close`. N'est PAS un paramètre de `compute_pnl_batch_gpu`. | `Combination.close_date`, `combinator.py` |
 | A2 | **Fallback CPU** : les tests doivent-ils tourner sans GPU ? | Oui obligatoirement. Module `engine/backend.py` expose `xp` (CuPy ou NumPy). Tous les tests sauf `test_gpu.py` (`@pytest.mark.gpu`) utilisent le backend CPU. | `backend.py`, tous les fichiers `engine/` |
-| A3 | **get_risk_free_rate()** : constante ou API live ? | Constante `0.045` pour V1 (dans `config.py`). Modifiable dans la sidebar (section avancée pliée). API live (^IRX) en V2. | `config.py`, `provider_base.py` |
+| A3 | **get_risk_free_rate()** : constante ou API live ? | **API live ^IRX (FEAT-012)** : `data/risk_free_rate.py` fetch le T-bill 13 semaines via yfinance, divise par 100, valide ∈ ]0, 20[ %. Cache 1 h dans la sidebar via `st.cache_data`. Fallback `config.DEFAULT_RISK_FREE_RATE = 0.045` si erreur réseau. Caption sidebar indique la source (`✓ ^IRX live` ou `⚠ fallback constante`). | `data/risk_free_rate.py`, `data/provider_yfinance.py`, `ui/components/sidebar.py` |
 | A4 | **Scénario vol median** : modifiable ? | Non. Toujours `1.0` (vol inchangée). Seules les bornes (vol basse/haute) sont modifiables par l'utilisateur. Le scorer et les filtres utilisent exclusivement le scénario median. | `config.py`, `filters.py`, `chart.py` |
 | A5 | **net_debit** : inclut-il le ×100 ? | Oui. `net_debit` est en dollars réels : `Σ (direction × qty × entry_mid × 100)`. TOUJOURS > 0 (les positions en crédit net sont filtrées par le Combinator). Capital engagé = `net_debit`. | `Combination`, `scorer.py`, `filters.py` |
 | A6 | **use_adjacent_expiry_pairs** : pourquoi ce flag ? | Les templates diagonales (Call Diagonal Backspread, Call Ratio Diagonal) nécessitent de tester TOUTES les paires (NEAR, FAR) à 5–45 jours d'écart, pas seulement (expirations[0], expirations[-1]). Flag dans `TemplateDefinition`. | `templates/base.py`, `engine/combinator.py` |

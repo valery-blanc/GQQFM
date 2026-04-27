@@ -4,8 +4,15 @@ import streamlit as st
 
 import config
 from data.models import ScoringCriteria
+from data.risk_free_rate import fetch_risk_free_rate
 from engine.backend import get_device_info
 from templates import ALL_TEMPLATES
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_risk_free_rate() -> tuple[float, str]:
+    """Cache 1h : évite de re-fetcher ^IRX à chaque rerun de la sidebar."""
+    return fetch_risk_free_rate()
 
 
 def _render_screener_section() -> None:
@@ -163,10 +170,19 @@ def render_sidebar() -> dict:
     vol_high = st.sidebar.slider("Vol haute (×)", 1.05, 2.0, 1.2, 0.05)
 
     with st.sidebar.expander("Avancé", expanded=True):
-        risk_free_rate = st.number_input(
-            "Taux sans risque", value=config.DEFAULT_RISK_FREE_RATE,
-            min_value=0.0, max_value=0.2, step=0.005, format="%.3f"
+        rfr_default, rfr_source = _cached_risk_free_rate()
+        rfr_help = (
+            f"^IRX (T-bill 13 semaines) live = {rfr_default * 100:.3f} %"
+            if rfr_source == "live"
+            else f"Yahoo indisponible — fallback constante = {rfr_default * 100:.3f} %"
         )
+        risk_free_rate = st.number_input(
+            "Taux sans risque", value=rfr_default,
+            min_value=0.0, max_value=0.2, step=0.005, format="%.3f",
+            help=rfr_help,
+        )
+        rfr_label = "✓ ^IRX live" if rfr_source == "live" else "⚠ fallback constante"
+        st.caption(f"{rfr_label} — {rfr_default * 100:.3f} %")
         max_combinations = st.number_input(
             "Max combinaisons", value=50_000, min_value=1_000, max_value=500_000,
             step=10_000,

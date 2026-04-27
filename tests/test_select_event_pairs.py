@@ -106,24 +106,30 @@ def test_step1_nfp_just_after_near():
         assert warning is None
 
 
-# ── Test 3 — Étape 2 nécessaire (extension near) ─────────────────────────────
+# ── Test 3 — Plages STRICTES (FEAT-011) : pas d'extension hors near_range ────
 
-def test_step2_near_extension():
-    """Toutes les near normales bloquées par NFP → fallback near=4j avec warning."""
+def test_strict_range_no_near_extension():
+    """
+    FEAT-011 : la plage near_range est une contrainte stricte.
+    Une expiration en dehors (ici 4j, sous near_min=5) ne peut JAMAIS être
+    sélectionnée, même quand toutes les near in-range sont bloquées par CRITICAL.
+    Le code doit alors basculer sur le dernier recours (CRITICAL accepté + warning),
+    en restant dans la plage user.
+    """
     exps = make_expirations([4, 10, 15, 33, 47])
     cal = make_calendar(critical_days=[8])
-    # near=10j: NFP day 8 IN danger → blocked
-    # near=15j: NFP day 8 IN danger → blocked
-    # near=4j: NFP day 8 NOT in [today, today+4] → safe, but below normal range
+    # near=10j et near=15j : NFP day 8 in danger → bloqués
+    # near=4j : sous near_min=5 → JAMAIS sélectionné (plage stricte)
 
     results = _select_event_pairs(exps, NEAR_RANGE, FAR_RANGE, cal)
 
     assert len(results) > 0
     for near, far, factor, sweet_names, warning in results:
         near_days = (near - TODAY).days
-        assert near_days == 4
-        assert warning is not None
-        assert "4j" in warning or "court" in warning.lower()
+        assert near_days >= NEAR_RANGE[0], f"near={near_days}j hors plage stricte"
+        assert near_days <= NEAR_RANGE[1], f"near={near_days}j hors plage stricte"
+        # Comme step 1 est vide, on est en dernier recours → CRITICAL warning
+        assert warning is not None and "⚠" in warning
 
 
 # ── Test 4 — Étape 4 nécessaire (dernier recours) ────────────────────────────

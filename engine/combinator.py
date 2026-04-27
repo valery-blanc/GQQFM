@@ -25,11 +25,14 @@ def _select_event_pairs(
     """
     Sélectionne les meilleures paires d'expirations selon le profil événementiel.
 
-    Algorithme en 4 étapes :
+    Les plages near_range et far_range sont des contraintes STRICTES (FEAT-011) :
+    on ne sort jamais des bornes choisies par l'utilisateur dans la sidebar.
+
+    Algorithme en 2 étapes :
       Étape 1 — Paires normales (near ∈ near_range, far ∈ far_range), CRITICAL exclus.
-      Étape 2 — Extension near vers le bas [2, near_min-1], CRITICAL exclus, warning "near_expiry_short".
-      Étape 3 — Extension far vers le haut [far_max+1, far_max+30], CRITICAL exclus.
-      Étape 4 — Dernier recours : meilleure paire normale avec CRITICAL + warning explicite.
+      Étape 2 — Dernier recours : paires (near ∈ near_range, far ∈ far_range)
+                avec CRITICAL accepté + warning explicite.
+      Sinon : retourne [] et le combinator utilisera _build_default_pairs.
 
     Retourne les top_n paires triées par event_score_factor décroissant.
     Chaque élément : (near_exp, far_exp, factor, sweet_names, warning).
@@ -48,78 +51,33 @@ def _select_event_pairs(
         sweet_names = [f"{ev.name} {ev.date.strftime('%d/%m')}" for ev in profile["sweet_zone"]]
         return profile["event_score_factor"], sweet_names, profile["has_critical_in_danger"]
 
-    def build_pairs(near_candidates, far_candidates, warning_fn=None):
-        """Construit la liste des paires valides sans CRITICAL en danger zone."""
-        pairs = []
-        for near in near_candidates:
-            for far in far_candidates:
-                if (far - near).days < 10:
-                    continue
-                factor, sweet_names, has_critical = classify(near, far)
-                if has_critical:
-                    continue
-                warning = warning_fn(near) if warning_fn else None
-                pairs.append((near, far, factor, sweet_names, warning))
-        return pairs
-
-    # Candidats far normaux
+    near_normal = [e for e in available_expirations if near_min <= days_out(e) <= near_max]
     far_normal = [e for e in available_expirations if far_min <= days_out(e) <= far_max]
 
-    # ── Étape 1 : paires normales ─────────────────────────────────────────────
-    near_normal = [e for e in available_expirations if near_min <= days_out(e) <= near_max]
-    step1_pairs = build_pairs(near_normal, far_normal)
+    # ── Étape 1 : paires normales (CRITICAL exclus) ───────────────────────────
+    step1_pairs = []
+    for near in near_normal:
+        for far in far_normal:
+            if (far - near).days < 10:
+                continue
+            factor, sweet_names, has_critical = classify(near, far)
+            if has_critical:
+                continue
+            step1_pairs.append((near, far, factor, sweet_names, None))
+
     if step1_pairs:
         step1_pairs.sort(key=lambda x: -x[2])
         return step1_pairs[:top_n]
 
-    # ── Étape 2 : extension near vers le bas ──────────────────────────────────
-    near_extended = [e for e in available_expirations if 2 <= days_out(e) < near_min]
-
-    def near_short_warning(near: date) -> str:
-        d = days_out(near)
-        return f"Near expiry très court ({d}j) — prime de calendar réduite"
-
-    step2_pairs = build_pairs(near_extended, far_normal, warning_fn=near_short_warning)
-    if step2_pairs:
-        step2_pairs.sort(key=lambda x: -x[2])
-        return step2_pairs[:top_n]
-
-    # ── Étape 3 : extension far vers le haut ──────────────────────────────────
-    far_extended = [e for e in available_expirations if far_max < days_out(e) <= far_max + 30]
-    all_near = near_normal + near_extended
-
-    def build_pairs_with_warning(near_candidates, far_candidates, warning_fn=None):
-        pairs = []
-        for near in near_candidates:
-            wfn = warning_fn if near in near_extended else None
-            for far in far_candidates:
-                if (far - near).days < 10:
-                    continue
-                factor, sweet_names, has_critical = classify(near, far)
-                if has_critical:
-                    continue
-                warning = wfn(near) if wfn else None
-                pairs.append((near, far, factor, sweet_names, warning))
-        return pairs
-
-    step3_pairs = build_pairs_with_warning(all_near, far_extended,
-                                            warning_fn=near_short_warning)
-    if step3_pairs:
-        step3_pairs.sort(key=lambda x: -x[2])
-        return step3_pairs[:top_n]
-
-    # ── Étape 4 : dernier recours ─────────────────────────────────────────────
-    # Meilleure paire normale (étape 1, CRITICAL accepté) + warning explicite
-    all_far = far_normal + far_extended if far_extended else far_normal
+    # ── Étape 2 : dernier recours (CRITICAL accepté avec warning) ─────────────
     last_resort = []
     for near in near_normal:
-        for far in all_far:
+        for far in far_normal:
             if (far - near).days < 10:
                 continue
             factor, sweet_names, has_critical = classify(near, far)
             if not has_critical:
                 continue
-            # Identifier l'événement CRITICAL en danger zone
             profile = event_calendar.classify_events_for_pair(near, far)
             critical_events = [ev for ev in profile["danger_zone"]
                                if hasattr(ev, "impact") and ev.impact.name == "CRITICAL"]
