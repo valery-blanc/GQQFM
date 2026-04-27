@@ -2,16 +2,39 @@
 
 from datetime import date, timedelta
 
+import numpy as np
 import streamlit as st
 
 from data.models import Combination
 
+REALISTIC_MOVE_PCT = 0.03  # ±3 % : amplitude typique d'un sous-jacent sur quelques jours
 
-def _render_exit_plan(combination: Combination) -> None:
-    """Affiche les seuils de sortie recommandés (target / stop / date butoir)."""
+
+def _render_exit_plan(
+    combination: Combination,
+    metrics: dict,
+    pnl_tensor: np.ndarray,
+    spot_range: np.ndarray,
+    current_spot: float,
+) -> None:
+    """Affiche les seuils de sortie calibrés sur la courbe P&L réelle."""
     net_debit = combination.net_debit
-    target_profit = net_debit * 0.30
-    stop_loss = net_debit * 0.50
+    if net_debit <= 0:
+        return
+
+    # Target réaliste : max P&L observé si le spot reste dans ±3 % (vol médiane)
+    pnl_mid = pnl_tensor[1]
+    pct_change = spot_range / current_spot - 1.0
+    in_range = (pct_change >= -REALISTIC_MOVE_PCT) & (pct_change <= REALISTIC_MOVE_PCT)
+    if in_range.any():
+        target_dollar = float(pnl_mid[in_range].max())
+    else:
+        target_dollar = float(pnl_mid.max())
+    target_pct = target_dollar / net_debit * 100
+
+    # Stop loss = perte max structurelle (déjà calculée par le scanner)
+    max_loss_pct = metrics["max_loss_pct"]   # négatif
+    stop_dollar = max_loss_pct / 100 * net_debit
 
     deadline = combination.close_date - timedelta(days=3)
     days_left = (deadline - date.today()).days
@@ -26,8 +49,18 @@ def _render_exit_plan(combination: Combination) -> None:
         )
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Target profit (+30 %)", f"+${target_profit:,.0f}")
-    col2.metric("Stop loss (−50 %)", f"−${stop_loss:,.0f}")
+    col1.metric(
+        f"Target (spot ±{int(REALISTIC_MOVE_PCT*100)} %)",
+        f"+${target_dollar:,.0f}",
+        delta=f"+{target_pct:.1f}% capital",
+        delta_color="off",
+    )
+    col2.metric(
+        "Stop loss (perte max struct.)",
+        f"−${abs(stop_dollar):,.0f}",
+        delta=f"{max_loss_pct:.1f}% capital",
+        delta_color="off",
+    )
     col3.metric("Date butoir (J-3 short)", deadline.strftime("%d %b %Y"))
 
     if days_left < 0:
@@ -39,8 +72,8 @@ def _render_exit_plan(combination: Combination) -> None:
     col4.metric("Jours restants", days_label)
 
     st.caption(
-        "Couper aussi si : spot sort de ±15 % du strike central "
-        "(thèse vol/temps cassée) ou si la perte courante atteint le stop −50 %."
+        f"Target = P&L max sur la courbe vol médiane si le spot reste dans ±{int(REALISTIC_MOVE_PCT*100)} % "
+        f"sur quelques jours. Stop = perte max structurelle de la combo (le pire cas que le scanner a identifié)."
     )
 
 
@@ -75,7 +108,14 @@ def _check_ex_div_warning(combination: Combination, symbol: str | None) -> str |
     return None
 
 
-def render_combo_detail(combination: Combination, metrics: dict, symbol: str | None = None) -> None:
+def render_combo_detail(
+    combination: Combination,
+    metrics: dict,
+    symbol: str | None = None,
+    pnl_tensor: np.ndarray | None = None,
+    spot_range: np.ndarray | None = None,
+    current_spot: float | None = None,
+) -> None:
     """Affiche les détails d'une combinaison : legs, coûts, métriques."""
     st.subheader("Détails de la combinaison")
 
@@ -94,7 +134,8 @@ def render_combo_detail(combination: Combination, metrics: dict, symbol: str | N
     if ex_div_warning:
         st.info(ex_div_warning)
 
-    _render_exit_plan(combination)
+    if pnl_tensor is not None and spot_range is not None and current_spot is not None:
+        _render_exit_plan(combination, metrics, pnl_tensor, spot_range, current_spot)
 
     rows = []
     for i, leg in enumerate(combination.legs, 1):

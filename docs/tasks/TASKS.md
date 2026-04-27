@@ -205,5 +205,13 @@
 
 - [x] ui/components/combo_detail.py — fonction `_render_exit_plan`
 - [x] docs/specs/FEAT-010-exit-plan-panel.md
-- [ ] docs/specs/option_scanner_spec_v2.md — section UI
+- [x] docs/specs/option_scanner_spec_v2.md — section UI
+- [x] commit e7c88b6 (1ère version : %  fixes +30 %/-50 %)
+
+## FEAT-010b — Plan de sortie calibré sur la courbe P&L réelle
+
+- [x] ui/components/combo_detail.py — target = max P&L dans ±3 % spot, stop = max_loss_pct
+- [x] ui/components/combo_detail.py — signature `_render_exit_plan` : ajout pnl_tensor, spot_range, current_spot
+- [x] ui/app.py — passage pnl_tensor / spot_range / current_spot à render_combo_detail
+- [x] docs/specs/option_scanner_spec_v2.md — section UI réécrite
 - [ ] validation utilisateur, puis commit unique

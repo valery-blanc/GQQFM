@@ -315,7 +315,13 @@ def main():
     # Détails de la combinaison
     symbols = results.get("symbols")
     combo_symbol = symbols[idx] if symbols else (results.get("symbol") or None)
-    render_combo_detail(combo, m, symbol=combo_symbol)
+    render_combo_detail(
+        combo, m,
+        symbol=combo_symbol,
+        pnl_tensor=pnl_for_combo,
+        spot_range=results["spot_ranges"][idx],
+        current_spot=results["spots"][idx],
+    )
 
 
 if __name__ == "__main__":

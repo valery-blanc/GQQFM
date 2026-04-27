@@ -941,10 +941,17 @@ Chaque ligne est cliquable pour afficher le graphique P&L détaillé.
 5. Les détails de la combinaison sélectionnée s'affichent en bas
 
 **Panneau "Plan de sortie" (FEAT-010)** — affiché dans `combo_detail`, sous les
-4 métriques principales et au-dessus du tableau des legs. Présente :
+4 métriques principales et au-dessus du tableau des legs. Les seuils sont
+calibrés sur les **données réelles** de la combinaison (pas des % arbitraires) :
 
-- **Target profit (+30 %)** : `net_debit × 0.30` en dollars
-- **Stop loss (−50 %)** : `net_debit × 0.50` en dollars
+- **Target (spot ±3 %)** : `max(pnl_mid)` sur la portion de la grille spot
+  comprise dans `[current_spot × 0.97, current_spot × 1.03]`. Représente le
+  P&L plausible si le sous-jacent ne bouge que de ±3 % sur quelques jours
+  (vol implicite inchangée — scénario médian de la bande de vol).
+- **Stop loss (perte max struct.)** : `max_loss_pct` calculé par le scanner —
+  c'est le pire cas que la structure permet, déjà connu à l'entrée. Pas de
+  pourcentage arbitraire (les anciens "−50 % du débit" étaient inadaptés car
+  souvent au-delà de la perte structurelle réelle).
 - **Date butoir (J-3 short)** : `close_date − 3 jours calendaires`. Au-delà,
   le gamma de la jambe courte explose et le profil P&L affiché par le scanner
   devient caduc.
@@ -953,8 +960,8 @@ Chaque ligne est cliquable pour afficher le graphique P&L détaillé.
 Si `combination.events_in_sweet_zone` est non vide, un bandeau `st.info` invite
 à sortir dès le lendemain de l'event (l'IV crush est la thèse de la position).
 
-Note explicative en `st.caption` : couper aussi si le spot sort de ±15 % du
-strike central (thèse vol/temps cassée) ou si la perte courante atteint le stop.
+`render_combo_detail` reçoit donc `pnl_tensor`, `spot_range` et `current_spot`
+en plus des arguments précédents (passés depuis `ui/app.py`).
 
 **Format de la colonne Legs (FEAT-003) :**
 
