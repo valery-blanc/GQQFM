@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-008 (2026-03-26)
+> Version : FEAT-010 (2026-04-27)
 
 ## 1. Vue d'ensemble
 
@@ -939,6 +939,22 @@ Chaque ligne est cliquable pour afficher le graphique P&L détaillé.
 3. Les résultats apparaissent dans le tableau (1 ligne = 1 combinaison, triées par score)
 4. Clic sur une ligne → le graphique P&L se met à jour
 5. Les détails de la combinaison sélectionnée s'affichent en bas
+
+**Panneau "Plan de sortie" (FEAT-010)** — affiché dans `combo_detail`, sous les
+4 métriques principales et au-dessus du tableau des legs. Présente :
+
+- **Target profit (+30 %)** : `net_debit × 0.30` en dollars
+- **Stop loss (−50 %)** : `net_debit × 0.50` en dollars
+- **Date butoir (J-3 short)** : `close_date − 3 jours calendaires`. Au-delà,
+  le gamma de la jambe courte explose et le profil P&L affiché par le scanner
+  devient caduc.
+- **Jours restants** : décompte jusqu'à la date butoir, préfixé `⚠` si < 5 j
+
+Si `combination.events_in_sweet_zone` est non vide, un bandeau `st.info` invite
+à sortir dès le lendemain de l'event (l'IV crush est la thèse de la position).
+
+Note explicative en `st.caption` : couper aussi si le spot sort de ±15 % du
+strike central (thèse vol/temps cassée) ou si la perte courante atteint le stop.
 
 **Format de la colonne Legs (FEAT-003) :**
 

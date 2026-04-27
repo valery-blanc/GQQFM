@@ -1,8 +1,47 @@
 """Vue détaillée d'une combinaison sélectionnée."""
 
+from datetime import date, timedelta
+
 import streamlit as st
 
 from data.models import Combination
+
+
+def _render_exit_plan(combination: Combination) -> None:
+    """Affiche les seuils de sortie recommandés (target / stop / date butoir)."""
+    net_debit = combination.net_debit
+    target_profit = net_debit * 0.30
+    stop_loss = net_debit * 0.50
+
+    deadline = combination.close_date - timedelta(days=3)
+    days_left = (deadline - date.today()).days
+
+    st.markdown("##### Plan de sortie")
+
+    if combination.events_in_sweet_zone:
+        events_str = ", ".join(combination.events_in_sweet_zone)
+        st.info(
+            f"📅 Sortie post-event recommandée : fermer dès le lendemain de "
+            f"**{events_str}** (l'IV crush attendu est la thèse de la position)."
+        )
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Target profit (+30 %)", f"+${target_profit:,.0f}")
+    col2.metric("Stop loss (−50 %)", f"−${stop_loss:,.0f}")
+    col3.metric("Date butoir (J-3 short)", deadline.strftime("%d %b %Y"))
+
+    if days_left < 0:
+        days_label = "dépassée"
+    elif days_left < 5:
+        days_label = f"⚠ {days_left} j"
+    else:
+        days_label = f"{days_left} j"
+    col4.metric("Jours restants", days_label)
+
+    st.caption(
+        "Couper aussi si : spot sort de ±15 % du strike central "
+        "(thèse vol/temps cassée) ou si la perte courante atteint le stop −50 %."
+    )
 
 
 def _check_ex_div_warning(combination: Combination, symbol: str | None) -> str | None:
@@ -54,6 +93,8 @@ def render_combo_detail(combination: Combination, metrics: dict, symbol: str | N
     ex_div_warning = _check_ex_div_warning(combination, symbol)
     if ex_div_warning:
         st.info(ex_div_warning)
+
+    _render_exit_plan(combination)
 
     rows = []
     for i, leg in enumerate(combination.legs, 1):
