@@ -236,4 +236,20 @@
 - [x] tests/test_select_event_pairs.py — `test_step2_near_extension` réécrit en `test_strict_range_no_near_extension`
 - [x] docs/specs/FEAT-012-rfr-live.md
 - [x] docs/specs/option_scanner_spec_v2.md — version + §A3
-- [ ] validation utilisateur, puis commit unique
+- [x] commit b033b7b
+
+## FEAT-013 — Backtesting historique via Polygon.io free tier
+
+- [x] data/cache_polygon.py — cache SQLite (TTL infini, key = path+params)
+- [x] data/provider_polygon.py — `PolygonHistoricalProvider`, `resolve_polygon_key`, throttle 13s + retry 30s
+- [x] backtesting/__init__.py + backtesting/replay.py — `backtest_combo`, `BacktestPoint`
+- [x] data/provider_polygon.py — `progress_callback` dans `get_options_chain`
+- [x] backtesting/replay.py — `progress_callback` dans `backtest_combo`
+- [x] ui/page_backtest.py — page complète : scan + sélection combo + replay graph
+- [x] ui/components/sidebar.py — radio Mode + date_input `as_of` conditionnel
+- [x] ui/app.py — routage Live / Backtest
+- [x] .gitignore — `polygon.key` + `data/.polygon_cache.db`
+- [x] polygon.key — clé utilisateur (gitignored)
+- [x] Test local : SPY @ 2025-09-15, calendar 665 call → +$288 réalisé après expiration (matched manuellement)
+- [x] docs/specs/FEAT-013-backtest-polygon.md
+- [ ] validation utilisateur sur ANQA (URL : http://192.168.0.133:8501)

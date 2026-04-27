@@ -246,6 +246,12 @@ def main():
 
     params = render_sidebar()
 
+    # Routage Live / Backtest
+    if params.get("mode") == "backtest":
+        from ui.page_backtest import render_backtest_page
+        render_backtest_page(params)
+        return
+
     # État de session
     if "results" not in st.session_state:
         st.session_state.results = None

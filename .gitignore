@@ -11,3 +11,11 @@ venv/
 *.log
 .DS_Store
 Thumbs.db
+
+# Clés API — ne pas committer
+polygon.key
+*.key.local
+
+# Cache local Polygon (peut faire plusieurs MB)
+data/.polygon_cache.db
+*.db-journal

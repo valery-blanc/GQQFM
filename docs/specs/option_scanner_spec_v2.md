@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-012 (2026-04-27)
+> Version : FEAT-013 (2026-04-27)
 
 ## 1. Vue d'ensemble
 

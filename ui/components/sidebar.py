@@ -1,5 +1,7 @@
 """Panneau latéral Streamlit : saisie des paramètres."""
 
+from datetime import date
+
 import streamlit as st
 
 import config
@@ -106,6 +108,8 @@ def render_sidebar() -> dict:
     Affiche la sidebar et retourne un dict avec tous les paramètres saisis.
 
     Retourne:
+        mode: "live" | "backtest"
+        as_of: date | None        (uniquement en backtest)
         symbols: list[str]
         selected_templates: list[str]
         criteria: ScoringCriteria
@@ -116,6 +120,31 @@ def render_sidebar() -> dict:
         scan_clicked: bool
     """
     st.sidebar.title("Options P&L Scanner")
+
+    from datetime import date as _date_today, timedelta as _td
+    mode = st.sidebar.radio(
+        "Mode",
+        options=["Live (yfinance)", "Backtest (Polygon historique)"],
+        index=0,
+        help=(
+            "**Live** : scan en temps réel via Yahoo Finance.\n\n"
+            "**Backtest** : rejoue un scan à une date passée via Polygon (free tier 5/min, "
+            "première requête peut prendre 20-30 min puis cache instantané)."
+        ),
+    )
+    is_backtest = mode.startswith("Backtest")
+    as_of: date | None = None
+    if is_backtest:
+        # Polygon free tier : 2 ans d'historique
+        max_as_of = _date_today.today() - _td(days=1)
+        min_as_of = _date_today.today() - _td(days=2 * 365)
+        as_of = st.sidebar.date_input(
+            "Date d'entrée (as_of)",
+            value=max_as_of - _td(days=60),
+            min_value=min_as_of,
+            max_value=max_as_of,
+            help="Polygon free : 2 ans d'historique max.",
+        )
 
     # Injection depuis le screener : appliquée AVANT la création du widget
     if "_inject_symbols" in st.session_state:
@@ -254,6 +283,8 @@ def render_sidebar() -> dict:
     )
 
     return {
+        "mode": "backtest" if is_backtest else "live",
+        "as_of": as_of,
         "symbols": symbols,
         "selected_templates": selected_templates,
         "criteria": criteria,
