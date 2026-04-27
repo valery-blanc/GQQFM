@@ -113,7 +113,7 @@ def plot_pnl_profile(
     # Ligne spot courant
     fig.add_vline(
         x=current_spot,
-        line=dict(color="rgba(255,255,255,0.5)", dash="solid", width=1),
+        line=dict(color="black", dash="dash", width=1),
         annotation_text=f"Spot {current_spot:.2f}",
         annotation_position="bottom right",
     )
