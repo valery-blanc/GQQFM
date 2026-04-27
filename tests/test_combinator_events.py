@@ -230,8 +230,8 @@ class TestCombinatorMultiPairs:
         Avec un calendrier et plusieurs expirations éligibles,
         le combinator doit générer des combos pour plusieurs paires distinctes.
         """
-        # near candidates : 7j et 14j (dans [5,21])
-        # far candidates : 30j et 42j (dans [25,70])
+        # near candidates : 7j et 14j (dans [5,21] passé en explicite)
+        # far candidates : 30j et 42j (dans [25,70] passé en explicite)
         chain = make_mock_chain_multi(expiry_days=[7, 14, 30, 42])
 
         factors = {
@@ -253,7 +253,12 @@ class TestCombinatorMultiPairs:
         cal = MagicMock()
         cal.classify_events_for_pair.side_effect = classify_side_effect
 
-        combos = generate_combinations(CALENDAR_STRANGLE, chain, event_calendar=cal)
+        # Plages explicites (rétrocompat avec l'ancien défaut, FEAT-011)
+        combos = generate_combinations(
+            CALENDAR_STRANGLE, chain, event_calendar=cal,
+            near_expiry_range=(5, 21),
+            far_expiry_range=(25, 70),
+        )
         assert len(combos) > 0
 
         # Plusieurs paires near_exp distinctes doivent apparaître

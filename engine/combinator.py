@@ -141,6 +141,26 @@ def _select_event_pairs(
     return []
 
 
+def _build_default_pairs(
+    expirations: list[date],
+    near_range: tuple[int, int],
+    far_range: tuple[int, int],
+) -> list[tuple[date, date]]:
+    """Construit les paires (near, far) respectant les plages DTE quand event_calendar est absent."""
+    today = date.today()
+    near_min, near_max = near_range
+    far_min, far_max = far_range
+    near_candidates = [e for e in expirations if near_min <= (e - today).days <= near_max]
+    far_candidates = [e for e in expirations if far_min <= (e - today).days <= far_max]
+    pairs = [
+        (n, f) for n in near_candidates for f in far_candidates if (f - n).days >= 10
+    ]
+    if pairs:
+        return pairs
+    # Fallback : on garde au moins une paire pour ne pas casser l'UI
+    return [(expirations[0], expirations[-1])]
+
+
 def generate_combinations(
     template: TemplateDefinition,
     chain: OptionsChain,
@@ -149,6 +169,8 @@ def generate_combinations(
     min_volume: int = 0,
     max_net_debit: float = float("inf"),
     max_iterations: int = 2_000_000,
+    near_expiry_range: tuple[int, int] | None = None,
+    far_expiry_range: tuple[int, int] | None = None,
 ) -> list[Combination]:
     """
     Génère toutes les combinaisons valides pour un template donné.
@@ -170,16 +192,26 @@ def generate_combinations(
 
     spot = chain.underlying_price
 
+    near_range = near_expiry_range or config.SCANNER_NEAR_EXPIRY_RANGE
+    far_range = far_expiry_range or config.SCANNER_FAR_EXPIRY_RANGE
+
     # ── Construire la liste des paires (near_exp, far_exp) avec facteurs ──────
     # pair_event_info : (near, far) → (factor, sweet_names, warning)
     pair_event_info: dict[tuple[date, date], tuple[float, list[str], str | None]] = {}
 
+    today = date.today()
+    near_min, near_max = near_range
+    far_min, far_max = far_range
+
     if template.use_adjacent_expiry_pairs:
+        # Filtre near ∈ near_range, far ∈ far_range, far-near ≥ 10 j
         expiry_pairs = [
             (expirations[i], expirations[j])
             for i in range(len(expirations))
             for j in range(i + 1, len(expirations))
-            if 5 <= (expirations[j] - expirations[i]).days <= 45
+            if near_min <= (expirations[i] - today).days <= near_max
+            and far_min <= (expirations[j] - today).days <= far_max
+            and 10 <= (expirations[j] - expirations[i]).days <= 60
         ]
         if not expiry_pairs:
             expiry_pairs = [(expirations[0], expirations[-1])]
@@ -195,8 +227,8 @@ def generate_combinations(
         if event_calendar is not None:
             selected = _select_event_pairs(
                 expirations,
-                config.SCANNER_NEAR_EXPIRY_RANGE,
-                config.SCANNER_FAR_EXPIRY_RANGE,
+                near_range,
+                far_range,
                 event_calendar,
             )
             if selected:
@@ -206,9 +238,9 @@ def generate_combinations(
                     for near, far, factor, sweet, warning in selected
                 }
             else:
-                expiry_pairs = [(expirations[0], expirations[-1])]
+                expiry_pairs = _build_default_pairs(expirations, near_range, far_range)
         else:
-            expiry_pairs = [(expirations[0], expirations[-1])]
+            expiry_pairs = _build_default_pairs(expirations, near_range, far_range)
 
     all_combos: list[Combination] = []
 

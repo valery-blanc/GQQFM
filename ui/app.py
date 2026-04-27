@@ -56,6 +56,8 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
             max_combinations=max_combinations,
             min_volume=criteria.min_avg_volume,
             max_net_debit=criteria.max_net_debit,
+            near_expiry_range=params.get("near_expiry_range"),
+            far_expiry_range=params.get("far_expiry_range"),
         )
         all_combinations.extend(combos)
 
@@ -195,10 +197,11 @@ def run_multi_scan(params: dict) -> dict:
     # Chargement unique du calendrier événementiel (une seule requête Finnhub)
     from events.calendar import EventCalendar
     event_calendar = EventCalendar()
+    far_max = params.get("far_expiry_range", config.SCANNER_FAR_EXPIRY_RANGE)[1]
     try:
         event_calendar.load(
             from_date=date.today(),
-            to_date=date.today() + timedelta(days=config.SCANNER_FAR_EXPIRY_RANGE[1] + 7),
+            to_date=date.today() + timedelta(days=far_max + 7),
         )
     except Exception:
         event_calendar = None

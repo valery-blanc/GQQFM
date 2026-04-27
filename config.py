@@ -61,8 +61,10 @@ SCREENER_PENALTY_HIGH_IV_RANK: float = 0.5
 SCREENER_PENALTY_BACKWARDATION: float = 0.7
 
 # ── Scanner expiry ranges (sélection de paires événementielles) ──
-SCANNER_NEAR_EXPIRY_RANGE: tuple = (5, 21)    # jours avant expiration near
-SCANNER_FAR_EXPIRY_RANGE: tuple = (25, 90)    # jours avant expiration far
+# Defaults durcis (FEAT-011) : la fenêtre 14-35 j sur le short évite le gamma
+# cliff de la dernière semaine et reste dans la sweet zone théta des calendars.
+SCANNER_NEAR_EXPIRY_RANGE: tuple = (14, 35)   # jours avant expiration near (short leg)
+SCANNER_FAR_EXPIRY_RANGE: tuple = (35, 90)    # jours avant expiration far (long leg)
 
 # EventCalendar
 FINNHUB_API_KEY: str | None = None  # override via env var FINNHUB_API_KEY

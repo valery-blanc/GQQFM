@@ -172,6 +172,30 @@ def render_sidebar() -> dict:
             step=10_000,
             help="Réduire pour accélérer en mode CPU. GPU peut gérer 500K."
         )
+
+        st.markdown("**Échéance des legs (DTE)**")
+        near_expiry_range = st.slider(
+            "Short leg (jours)",
+            min_value=2, max_value=60,
+            value=config.SCANNER_NEAR_EXPIRY_RANGE,
+            step=1,
+            help=(
+                "Plage de jours avant expiration pour la jambe la plus courte. "
+                "En dessous de 14 j, le gamma cliff rend la position très sensible "
+                "aux mouvements du spot. La sweet zone théta/gamma est 21-35 j."
+            ),
+        )
+        far_expiry_range = st.slider(
+            "Long leg (jours)",
+            min_value=20, max_value=config.MAX_DAYS_TO_EXPIRY,
+            value=config.SCANNER_FAR_EXPIRY_RANGE,
+            step=1,
+            help=(
+                "Plage de jours avant expiration pour la jambe la plus longue. "
+                f"Le data provider ne récupère que les expirations ≤ {config.MAX_DAYS_TO_EXPIRY} j."
+            ),
+        )
+
         pricer_choice = st.radio(
             "Pricer",
             options=["Pricer américain : Bjerksund-Stensland", "Pricer européen : Black-Scholes"],
@@ -222,5 +246,7 @@ def render_sidebar() -> dict:
         "risk_free_rate": risk_free_rate,
         "max_combinations": int(max_combinations),
         "use_american_pricer": use_american_pricer,
+        "near_expiry_range": tuple(near_expiry_range),
+        "far_expiry_range": tuple(far_expiry_range),
         "scan_clicked": scan_clicked,
     }

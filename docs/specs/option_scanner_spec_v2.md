@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-010 (2026-04-27)
+> Version : FEAT-011 (2026-04-27)
 
 ## 1. Vue d'ensemble
 
@@ -987,6 +987,17 @@ dans les cellules — le séparateur ` | ` est la solution de rendu garantie.
 - Ratio G/L min : 0.1
 - Volume moyen min : 0
 - Budget max : $10 000
+
+**Plages d'échéance (FEAT-011)** — sliders dans l'expander *Avancé* :
+- **Short leg (DTE)** : défaut `(14, 35)` j. Bornes `[2, 60]`. En dessous de
+  14 j, le gamma de la jambe courte explose (gamma cliff de la dernière
+  semaine) et la position devient extrêmement sensible aux mouvements du spot.
+- **Long leg (DTE)** : défaut `(35, 90)` j. Bornes `[20, MAX_DAYS_TO_EXPIRY=90]`.
+
+Ces plages sont passées à `generate_combinations` via les paramètres
+`near_expiry_range` / `far_expiry_range`. Si l'utilisateur élargit `far_max`,
+le chargement de l'EventCalendar étend automatiquement la fenêtre Finnhub
+(`to_date = today + far_max + 7`).
 
 ### 8.3 Précisions sur les scénarios de volatilité
 

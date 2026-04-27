@@ -214,4 +214,15 @@
 - [x] ui/components/combo_detail.py — signature `_render_exit_plan` : ajout pnl_tensor, spot_range, current_spot
 - [x] ui/app.py — passage pnl_tensor / spot_range / current_spot à render_combo_detail
 - [x] docs/specs/option_scanner_spec_v2.md — section UI réécrite
+- [x] commit e4ae78e
+
+## FEAT-011 — Échéances DTE configurables (sliders sidebar) + défauts durcis
+
+- [x] config.py — `SCANNER_NEAR_EXPIRY_RANGE = (14, 35)` (était (5, 21))
+- [x] config.py — `SCANNER_FAR_EXPIRY_RANGE = (35, 90)` (était (25, 90))
+- [x] engine/combinator.py — ajout `_build_default_pairs` + paramètres `near_expiry_range` / `far_expiry_range`
+- [x] engine/combinator.py — branche `use_adjacent_expiry_pairs=True` filtre maintenant near/far par DTE absolu
+- [x] ui/components/sidebar.py — 2 sliders DTE dans expander Avancé
+- [x] ui/app.py — passage des plages au combinator + chargement event_calendar utilise `far_max` user
+- [x] tests/test_combinator_events.py — fix test multi-paires (passe plages explicites)
 - [ ] validation utilisateur, puis commit unique
