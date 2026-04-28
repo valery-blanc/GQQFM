@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-014 (2026-04-28)
+> Version : FEAT-016 (2026-04-28)
 
 ## 1. Vue d'ensemble
 
@@ -1257,13 +1257,25 @@ pas dans `config.py`. `config.py` ne contient que les constantes moteur.
 - Sauvegarde/chargement des scans
 - Amélioration du scoring (expected return pondéré, Sharpe ratio du P&L)
 
-### V2 — Backtesting (FEAT-013 + FEAT-014)
-- ✅ Provider historique Massive/Polygon (FEAT-013) — close EOD, throttle 13s, cache SQLite
+### V2 — Backtesting (FEAT-013 à FEAT-016)
+- ✅ Provider historique Massive/Polygon (FEAT-013) — close EOD, cache SQLite
 - ✅ Plan payant Massive $29/mois (FEAT-014) — appels illimités, heure intraday, ^IRX historique
   - `scan_time` : choix de l'heure (09:30–16:00 ET) via minute aggregates
-  - RFR : ^IRX yfinance pour le jour de simulation (non la valeur courante)
+  - RFR : ^IRX yfinance pour le jour de simulation
   - ETA dynamique basé sur la latence réseau réelle
   - `max_combinations` par défaut : 100 000 ; date par défaut : 2026-02-05
+- ✅ Profil P&L à J-N avant expiration short (FEAT-015)
+  - Slider 0-10j (défaut 3j) dans sidebar Avancé
+  - `combinations_to_tensor(days_before_close=N)` — `exit_date = close_date - N`
+  - Plan de sortie et jours restants cohérents avec le même J-N
+- ✅ Replay horaire précision 1h (FEAT-016)
+  - `backtest_combo_hourly` — barres 1h Massive, filtre NYSE 9h-15h ET, lun-ven
+  - Pagination `next_url` suivie (`_paginated`) — Polygon retourne ~86 barres/page
+  - `_plot_replay_hourly` : rangeslider + rangebreaks weekends/hors-NYSE
+  - Mode dollar automatique si `net_debit < $1` (combos à coût quasi-nul)
+  - Hover pré-formaté en strings Python (contourne bug format specifier Plotly)
+  - Slider jours par défaut = `close_date - as_of` (durée réelle de la jambe courte)
+  - Clé slider unique par combo (reset garanti au changement de combo)
 - Multi-ticker backtest (actuellement limité au 1er ticker)
 - Export CSV des résultats de backtest
 

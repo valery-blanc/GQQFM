@@ -252,7 +252,7 @@
 - [x] polygon.key — clé utilisateur (gitignored)
 - [x] Test local : SPY @ 2025-09-15, calendar 665 call → +$288 réalisé après expiration (matched manuellement)
 - [x] docs/specs/FEAT-013-backtest-polygon.md
-- [ ] validation utilisateur sur ANQA (URL : http://192.168.0.133:8501)
+- [x] validation utilisateur sur ANQA — OK (2026-04-28)
 
 ## FEAT-014 — Massive (ex-Polygon) plan payant
 
@@ -265,13 +265,52 @@
 - [x] ui/components/sidebar.py — défaut `max_combinations=100K`, `as_of=2026-02-05`, selectbox heure ET
 - [x] docs/specs/FEAT-014-massive-paid-tier.md
 - [x] docs/specs/option_scanner_spec_v2.md — version FEAT-014 + roadmap V2/V3 mise à jour
-- [x] backtesting/replay.py — pré-fetch plage complète en 1 appel/ticker (BUG-007 : 429 en rafale)
-- [ ] validation utilisateur sur ANQA (URL : http://192.168.0.133:8501)
+- [x] validation utilisateur sur ANQA — OK (2026-04-28)
+
+## BUG-007 — Replay 429 + crash Plotly add_vline
+
+- [x] backtesting/replay.py — pré-fetch plage complète en 1 appel/ticker (supprime 429 en rafale)
+- [x] ui/page_backtest.py — `leg.expiration.isoformat()` pour add_vline (int+date TypeError)
+- [x] ui/page_backtest.py — séparer add_vline / add_annotation (_mean(X) crash sur axe date)
+- [x] docs/bugs/BUG-007-replay-429-and-plotly-vline.md
+
+## BUG-008 — DTE calculés sur date.today() au lieu de as_of en backtest
+
+- [x] engine/combinator.py — `as_of` propagé dans `generate_combinations`, `_build_default_pairs`, `_select_event_pairs`
+- [x] ui/page_backtest.py — passage `as_of` à `generate_combinations`
+- [x] docs/bugs/BUG-008-dte-today-vs-asof.md
+
+## BUG-009 — Jours restants / ex-div utilisent date.today() en backtest
+
+- [x] ui/components/combo_detail.py — `as_of` propagé dans `render_combo_detail`, `_render_exit_plan`, `_check_ex_div_warning`
+- [x] ui/page_backtest.py — passage `as_of` + `days_before_close` à `render_combo_detail`
+- [x] docs/bugs/BUG-009-days-remaining-today-vs-asof.md
+
+## FEAT-015 — Profil P&L à J-N avant expiration short (0-10j, défaut 3)
+
+- [x] engine/pnl.py — `combinations_to_tensor(days_before_close=0)` — exit_date = close_date - N
+- [x] ui/components/sidebar.py — slider "Profil P&L à J-N" dans Avancé (0-10, défaut 3)
+- [x] ui/app.py + ui/page_backtest.py — `days_before_close` propagé au tenseur et combo_detail
+- [x] ui/components/combo_detail.py — `_render_exit_plan` utilise `days_before_close`, label dynamique J-N
+- [x] docs/specs/FEAT-015-pnl-days-before-close.md
+- [x] validation utilisateur sur ANQA — OK (2026-04-28)
 
 ## FEAT-016 — Replay horaire (précision 1h)
 
-- [x] FEAT-016-1 : backtesting/replay.py — `_prefetch_hourly_range` + `backtest_combo_hourly` (barres 1h, prefetch range en 1 appel/ticker)
-- [x] FEAT-016-2 : backtesting/replay.py — filtrage NYSE : 9h-16h ET (barres 9h-15h inclus), lun-ven
-- [x] FEAT-016-3 : ui/page_backtest.py — 2e bouton "Lancer le replay (précision horaire)" + `_plot_replay_hourly` avec rangeslider Plotly (zoom initial 5j)
-- [x] FEAT-016-4 : ui/page_backtest.py — slider jours par défaut = (combo.close_date - as_of).days
-- [x] FEAT-016-5 : ui/page_backtest.py — arrondis 2 décimales dans tous les affichages replay (hover, métriques, tableau)
+- [x] backtesting/replay.py — `_prefetch_hourly_range` (pagination next_url) + `backtest_combo_hourly`
+- [x] backtesting/replay.py — filtrage NYSE : 9h-15h ET, lun-ven
+- [x] ui/page_backtest.py — 2e bouton "Lancer le replay (précision horaire)" + `_plot_replay_hourly`
+- [x] ui/page_backtest.py — rangeslider Plotly + rangebreaks weekends/heures fermées
+- [x] ui/page_backtest.py — slider jours par défaut = (combo.close_date - as_of).days
+- [x] ui/page_backtest.py — titre graphe affiche nb barres + plage dates réelle
+- [x] docs/specs/FEAT-016-hourly-replay.md
+
+## BUG-010 à BUG-014 — Corrections replay (2026-04-28)
+
+- [x] BUG-010 : weekends et fériés supprimés du replay (carry-forward → skip)
+- [x] BUG-011 : slider bt_days_forward session state + tickformat .2f + rangebreaks heures
+- [x] BUG-012 : slider clé unique par combo + mode dollar si net_debit≈0 + hover pré-formaté strings
+- [x] BUG-013 : zoom initial replay horaire supprimé (données masquées derrière la fenêtre)
+- [x] BUG-014 : pagination next_url manquante dans _prefetch_hourly_range (tronquait à 86 barres)
+- [x] docs/bugs/BUG-010-014-replay-fixes.md
+- [x] validation utilisateur sur ANQA — OK (2026-04-28)
