@@ -230,7 +230,7 @@ def _plot_replay(points, combo, as_of: date) -> go.Figure:
         if as_of <= leg.expiration <= dates[-1]:
             label = f"{'L' if leg.direction == 1 else 'S'} {leg.option_type[0].upper()} K{leg.strike:g}"
             fig.add_vline(
-                x=leg.expiration,
+                x=leg.expiration.isoformat(),
                 line=dict(color="orange", dash="dot", width=1),
                 annotation_text=f"exp {label}",
                 annotation_position="top",
