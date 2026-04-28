@@ -201,7 +201,6 @@ def _plot_replay(points, combo, as_of: date) -> go.Figure:
         "expired": "#636EFA",
         "theoretical": "#FFA15A",
         "mixed": "#FFA15A",
-        "no_data": "#888888",
     }
     colors = [color_map.get(m, "#888") for m in modes]
 

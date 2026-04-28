@@ -185,27 +185,13 @@ def backtest_combo(
         d = as_of + timedelta(days=offset)
         cb(0.5 + 0.5 * offset / total_steps, f"Replay D+{offset} ({d.isoformat()})")
 
-        # Weekends : carry-forward, pas de calcul
-        if d.weekday() >= 5 and last_known_spot is not None:
-            points.append(BacktestPoint(
-                date=d, spot=last_known_spot,
-                pnl_dollar=last_known_pnl or 0.0,
-                pnl_pct=(last_known_pnl or 0.0) / net_debit * 100,
-                mode="no_data",
-            ))
+        # Weekends et jours fériés : on ne peut pas clôturer, on saute
+        if d.weekday() >= 5:
             continue
 
         spot_bar = _closest_bar(underlying_bars, d)
         if spot_bar is None:
-            if last_known_spot is None:
-                continue
-            points.append(BacktestPoint(
-                date=d, spot=last_known_spot,
-                pnl_dollar=last_known_pnl or 0.0,
-                pnl_pct=(last_known_pnl or 0.0) / net_debit * 100,
-                mode="no_data",
-            ))
-            continue
+            continue  # férié ou pas de données Polygon ce jour — marché fermé
 
         spot_today = spot_bar[0]
         last_known_spot = spot_today
