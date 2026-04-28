@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-013 (2026-04-27)
+> Version : FEAT-014 (2026-04-28)
 
 ## 1. Vue d'ensemble
 
@@ -1257,12 +1257,21 @@ pas dans `config.py`. `config.py` ne contient que les constantes moteur.
 - Sauvegarde/chargement des scans
 - Amélioration du scoring (expected return pondéré, Sharpe ratio du P&L)
 
+### V2 — Backtesting (FEAT-013 + FEAT-014)
+- ✅ Provider historique Massive/Polygon (FEAT-013) — close EOD, throttle 13s, cache SQLite
+- ✅ Plan payant Massive $29/mois (FEAT-014) — appels illimités, heure intraday, ^IRX historique
+  - `scan_time` : choix de l'heure (09:30–16:00 ET) via minute aggregates
+  - RFR : ^IRX yfinance pour le jour de simulation (non la valeur courante)
+  - ETA dynamique basé sur la latence réseau réelle
+  - `max_combinations` par défaut : 100 000 ; date par défaut : 2026-02-05
+- Multi-ticker backtest (actuellement limité au 1er ticker)
+- Export CSV des résultats de backtest
+
 ### V3
-- Sources de données alternatives (IBKR, Tradier, Polygon.io)
-- Backtesting historique (vérifier les combinaisons sur des données passées)
+- IBKR / Tradier live data
 - Alertes en temps réel (scanner en continu)
 - Gestion du smile de volatilité (vol surface au lieu d'une seule vol ATM)
-- Prise en compte des dividendes (Bjerksund-Stensland)
+- Reconstruction IV jour par jour dans le replay (actuellement IV figée à l'entrée)
 
 ---
 

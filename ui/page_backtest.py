@@ -34,20 +34,28 @@ def _make_progress_callback(bar, status):
 
 
 def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
-    """Pipeline scan complet sur une date passée via Polygon."""
+    """Pipeline scan complet sur une date passée via Massive (ex-Polygon)."""
+    from data.risk_free_rate import fetch_historical_risk_free_rate
+
     criteria = params["criteria"]
     vol_scenarios = [params["vol_low"], 1.0, params["vol_high"]]
-    rfr = params["risk_free_rate"]
+    scan_time: str | None = params.get("scan_time")
     selected = params["selected_templates"]
 
-    bar = st.progress(0.0, text=f"[{symbol} @ {as_of}] Initialisation…")
+    # ^IRX historique pour le jour de la simulation
+    rfr, rfr_src = fetch_historical_risk_free_rate(as_of)
+
+    time_label = f" @ {scan_time} ET" if scan_time else " (EOD)"
+    bar = st.progress(0.0, text=f"[{symbol} @ {as_of}{time_label}] Initialisation…")
     status = st.empty()
     cb = _make_progress_callback(bar, status)
     t_start = time.perf_counter()
 
+    cb(0.0, f"^IRX {as_of}: {rfr*100:.3f}% ({rfr_src})")
+
     provider = PolygonHistoricalProvider()
     chain = provider.get_options_chain(
-        symbol, as_of=as_of, progress_callback=cb,
+        symbol, as_of=as_of, progress_callback=cb, scan_time=scan_time,
     )
     spot = chain.underlying_price
     cb(0.97, f"Chain {symbol} : {len(chain.contracts)} contrats — génération combos…")
@@ -285,12 +293,15 @@ def render_backtest_page(params: dict) -> None:
             return
 
     results = st.session_state.bt_results
+    scan_time = params.get("scan_time")
+    time_label = f" @ {scan_time} ET" if scan_time else " (close EOD)"
     if results is None:
         st.info(
-            f"Mode **Backtest**. Date sélectionnée : `{as_of}`. "
+            f"Mode **Backtest**. Date : `{as_of}`{time_label}. "
             "Configure les paramètres dans la sidebar puis clique sur **Lancer le scan**.\n\n"
-            "⏱ Premier scan sur une date : 20-30 min (rate limit Polygon free 5/min). "
-            "Scans suivants sur la même date : instantané (cache SQLite)."
+            "Plan Massive payant — appels illimités. "
+            "Premier scan : quelques secondes à quelques minutes selon le ticker. "
+            "Scans suivants sur la même date+heure : instantané (cache SQLite)."
         )
         return
 

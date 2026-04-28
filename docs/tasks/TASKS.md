@@ -253,3 +253,16 @@
 - [x] Test local : SPY @ 2025-09-15, calendar 665 call → +$288 réalisé après expiration (matched manuellement)
 - [x] docs/specs/FEAT-013-backtest-polygon.md
 - [ ] validation utilisateur sur ANQA (URL : http://192.168.0.133:8501)
+
+## FEAT-014 — Massive (ex-Polygon) plan payant
+
+- [x] data/provider_polygon.py — throttle supprimé (`_RATE_LIMIT_SECONDS = 0.0`)
+- [x] data/provider_polygon.py — `_minute_bar_at` + `scan_time` dans `get_contract_close` / `get_underlying_close` / `get_options_chain`
+- [x] data/provider_polygon.py — ETA dynamique sur latence réelle + `SCAN_TIME_OPTIONS`
+- [x] data/provider_polygon.py — `get_risk_free_rate(as_of)` via yfinance historique
+- [x] data/risk_free_rate.py — `fetch_historical_risk_free_rate(as_of)`
+- [x] ui/page_backtest.py — ^IRX historique dans `run_backtest_scan` + `scan_time` passé au provider
+- [x] ui/components/sidebar.py — défaut `max_combinations=100K`, `as_of=2026-02-05`, selectbox heure ET
+- [x] docs/specs/FEAT-014-massive-paid-tier.md
+- [x] docs/specs/option_scanner_spec_v2.md — version FEAT-014 + roadmap V2/V3 mise à jour
+- [ ] validation utilisateur sur ANQA (URL : http://192.168.0.133:8501)

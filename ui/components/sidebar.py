@@ -128,23 +128,34 @@ def render_sidebar() -> dict:
         index=0,
         help=(
             "**Live** : scan en temps réel via Yahoo Finance.\n\n"
-            "**Backtest** : rejoue un scan à une date passée via Polygon (free tier 5/min, "
-            "première requête peut prendre 20-30 min puis cache instantané)."
+            "**Backtest** : rejoue un scan à une date passée via Massive (ex-Polygon). "
+            "Plan payant actif — appels illimités, choix de l'heure intraday, "
+            "^IRX historique. Cache SQLite pour les re-scans."
         ),
     )
     is_backtest = mode.startswith("Backtest")
     as_of: date | None = None
+    scan_time: str | None = None
     if is_backtest:
-        # Polygon free tier : 2 ans d'historique
         max_as_of = _date_today.today() - _td(days=1)
         min_as_of = _date_today.today() - _td(days=2 * 365)
+        default_as_of = _date_today(2026, 2, 5)
+        default_as_of = max(min_as_of, min(max_as_of, default_as_of))
         as_of = st.sidebar.date_input(
             "Date d'entrée (as_of)",
-            value=max_as_of - _td(days=60),
+            value=default_as_of,
             min_value=min_as_of,
             max_value=max_as_of,
-            help="Polygon free : 2 ans d'historique max.",
+            help="Massive (ex-Polygon) : 2 ans d'historique max.",
         )
+        from data.provider_polygon import SCAN_TIME_OPTIONS
+        scan_time_label = st.sidebar.selectbox(
+            "Heure du scan (ET)",
+            options=list(SCAN_TIME_OPTIONS.keys()),
+            index=1,
+            help="Heure de la prise de prix en temps de marché (America/New_York).",
+        )
+        scan_time = SCAN_TIME_OPTIONS[scan_time_label]
 
     # Injection depuis le screener : appliquée AVANT la création du widget
     if "_inject_symbols" in st.session_state:
@@ -213,7 +224,7 @@ def render_sidebar() -> dict:
         rfr_label = "✓ ^IRX live" if rfr_source == "live" else "⚠ fallback constante"
         st.caption(f"{rfr_label} — {rfr_default * 100:.3f} %")
         max_combinations = st.number_input(
-            "Max combinaisons", value=50_000, min_value=1_000, max_value=500_000,
+            "Max combinaisons", value=100_000, min_value=1_000, max_value=500_000,
             step=10_000,
             help="Réduire pour accélérer en mode CPU. GPU peut gérer 500K."
         )
@@ -285,6 +296,7 @@ def render_sidebar() -> dict:
     return {
         "mode": "backtest" if is_backtest else "live",
         "as_of": as_of,
+        "scan_time": scan_time,
         "symbols": symbols,
         "selected_templates": selected_templates,
         "criteria": criteria,
