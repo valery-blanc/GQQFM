@@ -226,14 +226,20 @@ def _plot_replay(points, combo, as_of: date) -> go.Figure:
     fig.add_hline(y=0, line=dict(color="gray", dash="dash", width=1))
 
     # Marqueurs verticaux pour chaque expiration de leg
+    # Note: add_vline + annotation_text déclenche _mean(X) dans Plotly qui plante
+    # sur un axe date — on sépare le trait et l'annotation.
     for leg in combo.legs:
         if as_of <= leg.expiration <= dates[-1]:
             label = f"{'L' if leg.direction == 1 else 'S'} {leg.option_type[0].upper()} K{leg.strike:g}"
-            fig.add_vline(
-                x=leg.expiration.isoformat(),
-                line=dict(color="orange", dash="dot", width=1),
-                annotation_text=f"exp {label}",
-                annotation_position="top",
+            x_iso = leg.expiration.isoformat()
+            fig.add_vline(x=x_iso, line=dict(color="orange", dash="dot", width=1))
+            fig.add_annotation(
+                x=x_iso, y=1.02, yref="paper",
+                text=f"exp {label}",
+                showarrow=False,
+                font=dict(size=10, color="orange"),
+                textangle=-90,
+                xanchor="center",
             )
 
     fig.update_layout(
