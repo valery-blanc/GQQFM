@@ -68,6 +68,7 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
         # event_calendar=None : pas d'historique d'events macro pour le moment
         combos = generate_combinations(
             template, chain,
+            as_of=as_of,
             event_calendar=None,
             max_combinations=max_combinations,
             min_volume=criteria.min_avg_volume,

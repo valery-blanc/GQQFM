@@ -21,6 +21,7 @@ def _select_event_pairs(
     far_range: tuple[int, int],
     event_calendar: EventCalendar,
     top_n: int = 3,
+    today: date | None = None,
 ) -> list[tuple[date, date, float, list[str], str | None]]:
     """
     Sélectionne les meilleures paires d'expirations selon le profil événementiel.
@@ -38,7 +39,8 @@ def _select_event_pairs(
     Chaque élément : (near_exp, far_exp, factor, sweet_names, warning).
     """
     from datetime import date as date_type
-    today = date_type.today()
+    if today is None:
+        today = date_type.today()
 
     near_min, near_max = near_range
     far_min, far_max = far_range
@@ -103,9 +105,11 @@ def _build_default_pairs(
     expirations: list[date],
     near_range: tuple[int, int],
     far_range: tuple[int, int],
+    today: date | None = None,
 ) -> list[tuple[date, date]]:
     """Construit les paires (near, far) respectant les plages DTE quand event_calendar est absent."""
-    today = date.today()
+    if today is None:
+        today = date.today()
     near_min, near_max = near_range
     far_min, far_max = far_range
     near_candidates = [e for e in expirations if near_min <= (e - today).days <= near_max]
@@ -122,6 +126,7 @@ def _build_default_pairs(
 def generate_combinations(
     template: TemplateDefinition,
     chain: OptionsChain,
+    as_of: date | None = None,
     event_calendar: EventCalendar | None = None,
     max_combinations: int = config.MAX_COMBINATIONS,
     min_volume: int = 0,
@@ -157,7 +162,7 @@ def generate_combinations(
     # pair_event_info : (near, far) → (factor, sweet_names, warning)
     pair_event_info: dict[tuple[date, date], tuple[float, list[str], str | None]] = {}
 
-    today = date.today()
+    today = as_of if as_of is not None else date.today()
     near_min, near_max = near_range
     far_min, far_max = far_range
 
@@ -188,6 +193,7 @@ def generate_combinations(
                 near_range,
                 far_range,
                 event_calendar,
+                today=today,
             )
             if selected:
                 expiry_pairs = [(near, far) for near, far, _, _, _ in selected]
@@ -196,9 +202,9 @@ def generate_combinations(
                     for near, far, factor, sweet, warning in selected
                 }
             else:
-                expiry_pairs = _build_default_pairs(expirations, near_range, far_range)
+                expiry_pairs = _build_default_pairs(expirations, near_range, far_range, today=today)
         else:
-            expiry_pairs = _build_default_pairs(expirations, near_range, far_range)
+            expiry_pairs = _build_default_pairs(expirations, near_range, far_range, today=today)
 
     all_combos: list[Combination] = []
 
