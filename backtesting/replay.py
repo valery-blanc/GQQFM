@@ -14,9 +14,13 @@ from data.provider_polygon import PolygonHistoricalProvider
 from data.provider_yfinance import _bs_price
 
 _ET = ZoneInfo("America/New_York")
-# NYSE regular session : barres horaires de 9h à 15h ET inclus (→ 9h-16h couverts)
-_NYSE_OPEN_HOUR = 9
-_NYSE_CLOSE_HOUR = 15
+
+# Résolutions disponibles pour le replay intraday : label → (multiplier, timespan Polygon)
+RESOLUTIONS: dict[str, tuple[int, str]] = {
+    "1h":    (1,  "hour"),
+    "15min": (15, "minute"),
+    "5min":  (5,  "minute"),
+}
 
 logger = logging.getLogger(__name__)
 
@@ -67,20 +71,23 @@ def _prefetch_daily_range(
     return result
 
 
-def _prefetch_hourly_range(
+def _prefetch_intraday_range(
     provider: PolygonHistoricalProvider,
     ticker: str,
     from_date: date,
     to_date: date,
+    multiplier: int = 1,
+    timespan: str = "hour",
 ) -> dict[datetime, tuple[float, int]]:
     """
-    Fetche toutes les barres 1h pour [from_date, to_date] en suivant la pagination.
-    Polygon retourne ~86 barres par page même avec limit=5000 — _paginated suit next_url.
-    Filtre NYSE : lun-ven, 9h-15h ET (session régulière).
+    Fetche les barres intraday pour [from_date, to_date] en suivant la pagination.
+    Supporte 1h (multiplier=1, timespan="hour"), 15min (15, "minute"), 5min (5, "minute").
+    Filtre NYSE : lun-ven, 9h30-16h ET.
     Retourne {datetime_et_naive: (close, volume)}.
     """
     all_bars = provider._paginated(
-        f"/v2/aggs/ticker/{ticker}/range/1/hour/{from_date.isoformat()}/{to_date.isoformat()}",
+        f"/v2/aggs/ticker/{ticker}/range/{multiplier}/{timespan}"
+        f"/{from_date.isoformat()}/{to_date.isoformat()}",
         {"limit": 5000},
     )
     result: dict[datetime, tuple[float, int]] = {}
@@ -89,11 +96,17 @@ def _prefetch_hourly_range(
         dt_et = dt_utc.astimezone(_ET)
         if dt_et.weekday() >= 5:
             continue
-        if not (_NYSE_OPEN_HOUR <= dt_et.hour <= _NYSE_CLOSE_HOUR):
+        # NYSE options : 9h30-16h ET
+        if dt_et.hour < 9 or (dt_et.hour == 9 and dt_et.minute < 30):
             continue
-        dt_naive = dt_et.replace(tzinfo=None)
-        result[dt_naive] = (float(bar["c"]), int(bar.get("v", 0)))
+        if dt_et.hour >= 16:
+            continue
+        result[dt_et.replace(tzinfo=None)] = (float(bar["c"]), int(bar.get("v", 0)))
     return result
+
+
+# Alias pour compatibilité
+_prefetch_hourly_range = _prefetch_intraday_range
 
 
 def _leg_value_hourly(
@@ -294,12 +307,12 @@ def backtest_combo_hourly(
     provider: PolygonHistoricalProvider | None = None,
     rate: float | None = None,
     progress_callback: ProgressCb | None = None,
+    resolution: str = "1h",
 ) -> list[BacktestPoint]:
     """
-    Replay horaire du P&L de `combination` sur `days_forward` jours après `as_of`.
-    Précision 1h, filtré NYSE (9h-16h ET, lun-ven).
-    Réutilise BacktestPoint avec BacktestPoint.date = datetime ET naive.
-    5 appels API (prefetch range 1h underlying + legs).
+    Replay intraday du P&L de `combination` sur `days_forward` jours après `as_of`.
+    resolution : "1h" | "15min" | "5min" (voir RESOLUTIONS)
+    Filtre NYSE 9h30-16h ET, lun-ven. BacktestPoint.date = datetime ET naive.
     """
     if provider is None:
         provider = PolygonHistoricalProvider()
@@ -307,20 +320,23 @@ def backtest_combo_hourly(
         rate = config.DEFAULT_RISK_FREE_RATE
     cb = progress_callback or (lambda p, m: None)
 
+    multiplier, timespan = RESOLUTIONS.get(resolution, (1, "hour"))
     underlying = _extract_underlying(combination.legs[0].contract_symbol)
     net_debit = combination.net_debit if combination.net_debit > 0 else 1e-6
     last_day = as_of + timedelta(days=days_forward)
     n_legs = len(combination.legs)
 
-    # ── Pré-fetch barres horaires ────────────────────────────────────────────
-    cb(0.0, f"Pré-fetch underlying {underlying} (horaire {as_of}→{last_day})…")
-    underlying_bars = _prefetch_hourly_range(provider, underlying, as_of, last_day)
+    # ── Pré-fetch barres intraday ────────────────────────────────────────────
+    cb(0.0, f"Pré-fetch {underlying} ({resolution}, {as_of}→{last_day})…")
+    underlying_bars = _prefetch_intraday_range(provider, underlying, as_of, last_day,
+                                               multiplier, timespan)
 
     all_leg_bars: dict[str, dict[datetime, tuple[float, int]]] = {}
     for i, leg in enumerate(combination.legs):
-        cb((i + 1) / (n_legs + 1), f"Pré-fetch {leg.contract_symbol} horaire ({i+1}/{n_legs})…")
-        all_leg_bars[leg.contract_symbol] = _prefetch_hourly_range(
-            provider, leg.contract_symbol, as_of, last_day
+        cb((i + 1) / (n_legs + 1),
+           f"Pré-fetch {leg.contract_symbol} {resolution} ({i+1}/{n_legs})…")
+        all_leg_bars[leg.contract_symbol] = _prefetch_intraday_range(
+            provider, leg.contract_symbol, as_of, last_day, multiplier, timespan
         )
 
     cb(0.5, "Calcul P&L horaire…")

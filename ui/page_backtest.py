@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import config
-from backtesting import backtest_combo, backtest_combo_hourly
+from backtesting import backtest_combo, backtest_combo_hourly, RESOLUTIONS
 from data.provider_polygon import PolygonHistoricalProvider, resolve_polygon_key
 from engine.backend import to_cpu, xp
 from engine.combinator import generate_combinations
@@ -304,7 +304,7 @@ def _plot_replay(points, combo, as_of: date) -> go.Figure:
     return fig
 
 
-def _plot_replay_hourly(points, combo, as_of) -> go.Figure:
+def _plot_replay_hourly(points, combo, as_of, resolution: str = "1h") -> go.Figure:
     """Graphe Plotly du P&L heure par heure avec rangeslider horizontal."""
     from datetime import datetime as _dt
     color_map = {"market": "#00CC96", "expired": "#636EFA",
@@ -344,24 +344,28 @@ def _plot_replay_hourly(points, combo, as_of) -> go.Figure:
     n_days = len(set(d.date() for d in dts)) if dts else 0
     date_range = f"{dts[0].strftime('%d/%m')} → {dts[-1].strftime('%d/%m/%Y')}" if dts else "—"
 
+    # Rangebreaks : weekends + heures hors NYSE (9h30-16h)
+    rbreaks = [dict(bounds=["sat", "mon"])]
+    if resolution == "1h":
+        rbreaks.append(dict(bounds=[16, 9], pattern="hour"))
+    else:
+        # Pour les résolutions sub-horaires, on cache avant 9h30 et après 16h
+        rbreaks.append(dict(bounds=[16, 9.5], pattern="hour"))
+
     fig.update_layout(
-        title=f"Backtest replay (horaire) — entrée {as_of.strftime('%d %b %Y')} "
+        title=f"Backtest replay ({resolution}) — entrée {as_of.strftime('%d %b %Y')} "
               f"| {len(dts)} barres / {n_days} jours ({date_range})",
         template="plotly_dark",
         xaxis=dict(
             title="Date / Heure (ET)",
             rangeslider=dict(visible=True, thickness=0.04),
-            rangebreaks=[
-                dict(bounds=["sat", "mon"]),
-                dict(bounds=[16, 9], pattern="hour"),
-            ],
+            rangebreaks=rbreaks,
         ),
-        yaxis=dict(title=y_label, ticksuffix=y_tick_sfx, tickformat=y_tick_fmt,
-                   domain=[0.06, 1.0]),
+        yaxis=dict(title=y_label, ticksuffix=y_tick_sfx, tickformat=y_tick_fmt),
         yaxis2=dict(title="Spot ($)", overlaying="y", side="right",
                     showgrid=False, tickformat=",.2f"),
         hovermode="x unified",
-        height=680,
+        height=620,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     return fig
@@ -481,10 +485,19 @@ def render_backtest_page(params: dict) -> None:
     slider_key = f"bt_days_{idx}_{combo.close_date}"
     days_forward = st.slider("Jours à replayer", 5, 60, default_days, 1, key=slider_key)
 
+    resolution = st.selectbox(
+        "Résolution intraday",
+        options=list(RESOLUTIONS.keys()),
+        index=0,
+        format_func={"1h": "1 heure", "15min": "15 minutes", "5min": "5 minutes"}.get,
+        key=f"bt_resolution_{idx}_{combo.close_date}",
+        help="Précision des barres pour le replay intraday (underlying + legs).",
+    )
+
     col_b1, col_b2 = st.columns(2)
-    launch_daily = col_b1.button("Lancer le replay (précision journalière)", type="primary",
+    launch_daily = col_b1.button("Lancer le replay (journalier)", type="primary",
                                   use_container_width=True)
-    launch_hourly = col_b2.button("Lancer le replay (précision horaire)", type="secondary",
+    launch_hourly = col_b2.button(f"Lancer le replay ({resolution})", type="secondary",
                                    use_container_width=True)
 
     if launch_daily:
@@ -512,9 +525,9 @@ def render_backtest_page(params: dict) -> None:
             points = backtest_combo_hourly(
                 combo, as_of=as_of, days_forward=days_forward,
                 provider=results["provider"], rate=params["risk_free_rate"],
-                progress_callback=cb,
+                progress_callback=cb, resolution=resolution,
             )
-            st.session_state.bt_replay = ("hourly", points)
+            st.session_state.bt_replay = (resolution, points)
         except Exception as exc:
             st.error(f"Erreur replay horaire : {exc}")
         finally:
@@ -524,8 +537,8 @@ def render_backtest_page(params: dict) -> None:
     replay_state = st.session_state.bt_replay
     if replay_state:
         replay_mode, points = replay_state
-        if replay_mode == "hourly":
-            replay_fig = _plot_replay_hourly(points, combo, as_of)
+        if replay_mode in RESOLUTIONS:
+            replay_fig = _plot_replay_hourly(points, combo, as_of, resolution=replay_mode)
         else:
             replay_fig = _plot_replay(points, combo, as_of)
         st.plotly_chart(replay_fig, use_container_width=True)
@@ -554,10 +567,11 @@ def render_backtest_page(params: dict) -> None:
             f"Expiré : {n_exp}"
         )
 
-        label_col = "Date/Heure" if replay_mode == "hourly" else "Date"
-        with st.expander(f"Détail {'heure par heure' if replay_mode == 'hourly' else 'jour par jour'}"):
+        is_intraday = replay_mode in RESOLUTIONS
+        label_col = f"Date/Heure ({replay_mode})" if is_intraday else "Date"
+        with st.expander(f"Détail {'barre par barre' if is_intraday else 'jour par jour'}"):
             import pandas as pd
-            fmt = "%d/%m %Hh%M" if replay_mode == "hourly" else "%Y-%m-%d"
+            fmt = "%d/%m %Hh%M" if is_intraday else "%Y-%m-%d"
             df = pd.DataFrame([{
                 label_col: p.date.strftime(fmt),
                 "Spot": f"${p.spot:.2f}",
