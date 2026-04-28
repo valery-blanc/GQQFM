@@ -16,7 +16,7 @@ from data.provider_polygon import PolygonHistoricalProvider, resolve_polygon_key
 from engine.backend import to_cpu, xp
 from engine.combinator import generate_combinations
 from engine.pnl import combinations_to_tensor, compute_pnl_batch
-from scoring.filters import filter_combinations
+from scoring.filters import filter_combinations, realistic_max_gain
 from scoring.probability import compute_loss_probability
 from scoring.scorer import score_combinations
 from templates import ALL_TEMPLATES
@@ -149,16 +149,27 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
         pnl_mid_filtered, spot_range, spot, atm_vol, days_to_close, rfr
     ))
 
+    import math
+    T = max(days_to_close, 1) / 365.0
+    realistic_range_pct = atm_vol * math.sqrt(T) * 100
+    spot_range_cpu = to_cpu(spot_range)
+    lo = spot * (1 - realistic_range_pct / 100)
+    hi = spot * (1 + realistic_range_pct / 100)
+    real_mask = (spot_range_cpu >= lo) & (spot_range_cpu <= hi)
+
     metrics = []
     for i in range(len(filtered_combos)):
         max_loss = pnl_mid_cpu[i].min()
         max_gain = pnl_mid_cpu[i].max()
+        real_pnl = pnl_mid_cpu[i][real_mask]
+        max_gain_real = float(real_pnl.max()) if real_mask.any() else max_gain
         nd = safe_debits[i] if safe_debits[i] != 0 else 1e-6
         metrics.append({
             "max_loss_pct": max_loss / nd * 100,
             "loss_prob_pct": loss_probs[i] * 100,
             "max_gain_pct": max_gain / nd * 100,
-            "gain_loss_ratio": max_gain / abs(max_loss) if max_loss != 0 else 0,
+            "max_gain_real_pct": max_gain_real / nd * 100,
+            "gain_loss_ratio": max_gain_real / abs(max_loss) if max_loss != 0 else 0,
             "score": float(scores_cpu[i]),
         })
 
@@ -185,6 +196,7 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
         "as_of": as_of,
         "provider": provider,
         "days_before_close": params.get("days_before_close", 3),
+        "realistic_range_pct": realistic_range_pct,
     }
 
 
@@ -442,7 +454,9 @@ def render_backtest_page(params: dict) -> None:
 
     st.markdown("---")
 
-    selected = render_results_table(results["combinations"], results["metrics"], results.get("symbols"))
+    selected = render_results_table(results["combinations"], results["metrics"],
+                                    results.get("symbols"),
+                                    realistic_range_pct=results.get("realistic_range_pct"))
     if selected is not None and selected != idx:
         st.session_state.bt_selected_idx = selected
         st.session_state.bt_replay = None
@@ -525,6 +539,20 @@ def render_backtest_page(params: dict) -> None:
                     f"{peak.pnl_pct:+.2f}% @ {peak.date.strftime('%d/%m')}")
         col3.metric("Worst P&L", f"${trough.pnl_dollar:+,.2f}",
                     f"{trough.pnl_pct:+.2f}% @ {trough.date.strftime('%d/%m')}")
+
+        # Ratio market / theoretical
+        from collections import Counter
+        mode_counts = Counter(p.mode for p in points)
+        total_pts = len(points)
+        n_mkt = mode_counts.get("market", 0)
+        n_theo = mode_counts.get("theoretical", 0) + mode_counts.get("mixed", 0)
+        n_exp = mode_counts.get("expired", 0)
+        st.caption(
+            f"Fiabilité replay — "
+            f"Market (prix réels) : **{n_mkt}/{total_pts} ({100*n_mkt//max(total_pts,1)}%)** | "
+            f"Theoretical (BS IV figée) : **{n_theo}/{total_pts} ({100*n_theo//max(total_pts,1)}%)** | "
+            f"Expiré : {n_exp}"
+        )
 
         label_col = "Date/Heure" if replay_mode == "hourly" else "Date"
         with st.expander(f"Détail {'heure par heure' if replay_mode == 'hourly' else 'jour par jour'}"):

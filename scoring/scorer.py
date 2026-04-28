@@ -2,6 +2,7 @@
 
 import config
 from engine.backend import xp
+from scoring.filters import realistic_max_gain
 from scoring.probability import compute_loss_probability
 
 
@@ -28,11 +29,11 @@ def score_combinations(
     """
     safe_debits = xp.where(net_debits == 0, xp.ones_like(net_debits) * 1e-6, net_debits)
 
-    max_gain = pnl_mid.max(axis=1)
+    max_gain_real = realistic_max_gain(pnl_mid, spot_range, current_spot, atm_vol, days_to_close)
     max_loss = xp.abs(pnl_mid.min(axis=1))
     safe_loss = xp.where(max_loss == 0, xp.ones_like(max_loss) * 1e-6, max_loss)
 
-    gain_loss_ratio = max_gain / safe_loss
+    gain_loss_ratio = max_gain_real / safe_loss
 
     loss_prob = compute_loss_probability(
         pnl_mid, spot_range, current_spot, atm_vol, days_to_close, risk_free_rate

@@ -123,11 +123,14 @@ def render_combo_detail(
     """Affiche les détails d'une combinaison : legs, coûts, métriques."""
     st.subheader("Détails de la combinaison")
 
+    gain_real = metrics.get("max_gain_real_pct", metrics.get("max_gain_pct", 0))
+    gain_abs  = metrics.get("max_gain_pct", 0)
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Net Debit", f"${combination.net_debit:,.0f}")
     col2.metric("Perte max", f"{metrics['max_loss_pct']:.1f}%")
     col3.metric("Proba perte", f"{metrics['loss_prob_pct']:.1f}%")
-    col4.metric("Ratio G/L", f"{metrics['gain_loss_ratio']:.1f}")
+    col4.metric("Gain ±1σ", f"{gain_real:.1f}%",
+                delta=f"max absolu {gain_abs:.0f}%", delta_color="off")
 
     st.caption(f"Template : `{combination.template_name}` — Clôture prévue : {combination.close_date}")
 

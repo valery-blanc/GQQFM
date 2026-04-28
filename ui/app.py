@@ -12,7 +12,7 @@ from engine.backend import to_cpu, to_xp
 from engine.backend import xp
 from engine.combinator import generate_combinations
 from engine.pnl import combinations_to_tensor, compute_pnl_batch
-from scoring.filters import filter_combinations
+from scoring.filters import filter_combinations, realistic_max_gain
 from scoring.probability import compute_loss_probability
 from scoring.scorer import score_combinations
 from templates import ALL_TEMPLATES
@@ -154,16 +154,27 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
         pnl_mid_filtered, spot_range, spot, atm_vol, days_to_close, rfr
     ))
 
+    import math
+    T = max(days_to_close, 1) / 365.0
+    realistic_range_pct = atm_vol * math.sqrt(T) * 100
+    spot_range_cpu = to_cpu(spot_range)
+    lo = spot * (1 - realistic_range_pct / 100)
+    hi = spot * (1 + realistic_range_pct / 100)
+    real_mask = (spot_range_cpu >= lo) & (spot_range_cpu <= hi)
+
     metrics = []
     for i in range(len(filtered_combos)):
         max_loss = pnl_mid_cpu[i].min()
         max_gain = pnl_mid_cpu[i].max()
+        real_pnl = pnl_mid_cpu[i][real_mask]
+        max_gain_real = float(real_pnl.max()) if real_mask.any() else max_gain
         nd = safe_debits[i] if safe_debits[i] != 0 else 1e-6
         metrics.append({
             "max_loss_pct": max_loss / nd * 100,
             "loss_prob_pct": loss_probs[i] * 100,
             "max_gain_pct": max_gain / nd * 100,
-            "gain_loss_ratio": max_gain / abs(max_loss) if max_loss != 0 else 0,
+            "max_gain_real_pct": max_gain_real / nd * 100,
+            "gain_loss_ratio": max_gain_real / abs(max_loss) if max_loss != 0 else 0,
             "score": float(scores_cpu[i]),
         })
 
@@ -187,6 +198,7 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
         "spot_range": to_cpu(spot_range),
         "spot": spot,
         "days_before_close": params.get("days_before_close", 3),
+        "realistic_range_pct": realistic_range_pct,
     }
 
 
@@ -316,7 +328,9 @@ def main():
     st.markdown("---")
 
     # Tableau des résultats
-    selected = render_results_table(results["combinations"], results["metrics"], results.get("symbols"))
+    selected = render_results_table(results["combinations"], results["metrics"],
+                                    results.get("symbols"),
+                                    realistic_range_pct=results.get("realistic_range_pct"))
     if selected is not None and selected != st.session_state.selected_combo_idx:
         st.session_state.selected_combo_idx = selected
         st.rerun()
