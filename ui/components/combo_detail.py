@@ -16,6 +16,7 @@ def _render_exit_plan(
     pnl_tensor: np.ndarray,
     spot_range: np.ndarray,
     current_spot: float,
+    as_of: date | None = None,
 ) -> None:
     """Affiche les seuils de sortie calibrés sur la courbe P&L réelle."""
     net_debit = combination.net_debit
@@ -37,7 +38,7 @@ def _render_exit_plan(
     stop_dollar = max_loss_pct / 100 * net_debit
 
     deadline = combination.close_date - timedelta(days=3)
-    days_left = (deadline - date.today()).days
+    days_left = (deadline - (as_of or date.today())).days
 
     st.markdown("##### Plan de sortie")
 
@@ -77,7 +78,8 @@ def _render_exit_plan(
     )
 
 
-def _check_ex_div_warning(combination: Combination, symbol: str | None) -> str | None:
+def _check_ex_div_warning(combination: Combination, symbol: str | None,
+                          as_of: date | None = None) -> str | None:
     """Vérifie si un ex-dividende tombe pendant la vie de la position."""
     if not symbol:
         return None
@@ -90,11 +92,10 @@ def _check_ex_div_warning(combination: Combination, symbol: str | None) -> str |
         if not ex_date_ts:
             return None
 
-        # exDividendDate est un timestamp Unix
         from datetime import datetime, timezone
         ex_date = datetime.fromtimestamp(ex_date_ts, tz=timezone.utc).date()
 
-        today = date.today()
+        today = as_of or date.today()
         close_date = combination.close_date
 
         if today <= ex_date <= close_date:
@@ -115,6 +116,7 @@ def render_combo_detail(
     pnl_tensor: np.ndarray | None = None,
     spot_range: np.ndarray | None = None,
     current_spot: float | None = None,
+    as_of: date | None = None,
 ) -> None:
     """Affiche les détails d'une combinaison : legs, coûts, métriques."""
     st.subheader("Détails de la combinaison")
@@ -130,12 +132,12 @@ def render_combo_detail(
     if combination.event_warning:
         st.warning(combination.event_warning)
 
-    ex_div_warning = _check_ex_div_warning(combination, symbol)
+    ex_div_warning = _check_ex_div_warning(combination, symbol, as_of=as_of)
     if ex_div_warning:
         st.info(ex_div_warning)
 
     if pnl_tensor is not None and spot_range is not None and current_spot is not None:
-        _render_exit_plan(combination, metrics, pnl_tensor, spot_range, current_spot)
+        _render_exit_plan(combination, metrics, pnl_tensor, spot_range, current_spot, as_of=as_of)
 
     rows = []
     for i, leg in enumerate(combination.legs, 1):

@@ -210,7 +210,7 @@ def _plot_replay(points, combo, as_of: date) -> go.Figure:
         line=dict(color="#636EFA", width=2),
         name="P&L %",
         customdata=np.stack([pnl_dollar, spots, modes], axis=1),
-        hovertemplate="%{x|%d %b %Y}<br>P&L: %{y:+.1f}% ($%{customdata[0]:+,.0f})<br>"
+        hovertemplate="%{x|%d %b %Y}<br>P&L: %{y:+.2f}% ($%{customdata[0]:+,.2f})<br>"
                       "Spot: $%{customdata[1]:.2f}<br>Mode: %{customdata[2]}<extra></extra>",
         yaxis="y",
     ))
@@ -238,7 +238,7 @@ def _plot_replay(points, combo, as_of: date) -> go.Figure:
                 x=x_iso, y=1.02, yref="paper",
                 text=f"exp {label}",
                 showarrow=False,
-                font=dict(size=10, color="orange"),
+                font=dict(size=13, color="orange"),
                 textangle=-90,
                 xanchor="center",
             )
@@ -355,6 +355,7 @@ def render_backtest_page(params: dict) -> None:
         pnl_tensor=pnl_for_combo,
         spot_range=results["spot_ranges"][idx],
         current_spot=results["spots"][idx],
+        as_of=as_of,
     )
 
     # ── Replay 30 jours ──────────────────────────────────────────────────────
@@ -390,19 +391,19 @@ def render_backtest_page(params: dict) -> None:
         peak = max(points, key=lambda p: p.pnl_dollar)
         trough = min(points, key=lambda p: p.pnl_dollar)
         col1, col2, col3 = st.columns(3)
-        col1.metric("P&L final", f"${final.pnl_dollar:+,.0f}", f"{final.pnl_pct:+.1f}%")
-        col2.metric("Peak P&L", f"${peak.pnl_dollar:+,.0f}",
-                    f"{peak.pnl_pct:+.1f}% @ {peak.date.strftime('%d/%m')}")
-        col3.metric("Worst P&L", f"${trough.pnl_dollar:+,.0f}",
-                    f"{trough.pnl_pct:+.1f}% @ {trough.date.strftime('%d/%m')}")
+        col1.metric("P&L final", f"${final.pnl_dollar:+,.2f}", f"{final.pnl_pct:+.2f}%")
+        col2.metric("Peak P&L", f"${peak.pnl_dollar:+,.2f}",
+                    f"{peak.pnl_pct:+.2f}% @ {peak.date.strftime('%d/%m')}")
+        col3.metric("Worst P&L", f"${trough.pnl_dollar:+,.2f}",
+                    f"{trough.pnl_pct:+.2f}% @ {trough.date.strftime('%d/%m')}")
 
         with st.expander("Détail jour par jour"):
             import pandas as pd
             df = pd.DataFrame([{
                 "Date": p.date.isoformat(),
                 "Spot": f"${p.spot:.2f}",
-                "P&L $": f"{p.pnl_dollar:+,.0f}",
-                "P&L %": f"{p.pnl_pct:+.1f}%",
+                "P&L $": f"{p.pnl_dollar:+,.2f}",
+                "P&L %": f"{p.pnl_pct:+.2f}%",
                 "Mode": p.mode,
             } for p in points])
             st.dataframe(df, use_container_width=True, hide_index=True)
