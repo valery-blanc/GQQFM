@@ -265,4 +265,5 @@
 - [x] ui/components/sidebar.py — défaut `max_combinations=100K`, `as_of=2026-02-05`, selectbox heure ET
 - [x] docs/specs/FEAT-014-massive-paid-tier.md
 - [x] docs/specs/option_scanner_spec_v2.md — version FEAT-014 + roadmap V2/V3 mise à jour
+- [x] backtesting/replay.py — pré-fetch plage complète en 1 appel/ticker (BUG-007 : 429 en rafale)
 - [ ] validation utilisateur sur ANQA (URL : http://192.168.0.133:8501)
