@@ -1,4 +1,4 @@
-"""Replay quotidien d'une combinaison sur N jours après l'entrée."""
+"""Replay quotidien et horaire d'une combinaison sur N jours après l'entrée."""
 
 from __future__ import annotations
 
@@ -6,11 +6,17 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 import config
 from data.models import Combination, Leg
 from data.provider_polygon import PolygonHistoricalProvider
 from data.provider_yfinance import _bs_price
+
+_ET = ZoneInfo("America/New_York")
+# NYSE regular session : barres horaires de 9h à 15h ET inclus (→ 9h-16h couverts)
+_NYSE_OPEN_HOUR = 9
+_NYSE_CLOSE_HOUR = 15
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +65,59 @@ def _prefetch_daily_range(
         d = datetime.fromtimestamp(bar["t"] / 1000, tz=timezone.utc).date()
         result[d] = (float(bar["c"]), int(bar.get("v", 0)))
     return result
+
+
+def _prefetch_hourly_range(
+    provider: PolygonHistoricalProvider,
+    ticker: str,
+    from_date: date,
+    to_date: date,
+) -> dict[datetime, tuple[float, int]]:
+    """
+    Fetche toutes les barres 1h pour [from_date, to_date] en un seul appel.
+    Filtre NYSE : lun-ven, 9h-15h ET (session régulière).
+    Retourne {datetime_et_naive: (close, volume)}.
+    """
+    data = provider._get(
+        f"/v2/aggs/ticker/{ticker}/range/1/hour/{from_date.isoformat()}/{to_date.isoformat()}",
+        params={"limit": 5000},
+    )
+    result: dict[datetime, tuple[float, int]] = {}
+    for bar in data.get("results", []):
+        dt_utc = datetime.fromtimestamp(bar["t"] / 1000, tz=timezone.utc)
+        dt_et = dt_utc.astimezone(_ET)
+        if dt_et.weekday() >= 5:
+            continue
+        if not (_NYSE_OPEN_HOUR <= dt_et.hour <= _NYSE_CLOSE_HOUR):
+            continue
+        dt_naive = dt_et.replace(tzinfo=None)
+        result[dt_naive] = (float(bar["c"]), int(bar.get("v", 0)))
+    return result
+
+
+def _leg_value_hourly(
+    leg: Leg,
+    dt_et: datetime,
+    spot_today: float,
+    leg_bars: dict[datetime, tuple[float, int]],
+    rate: float,
+    spot_at_leg_expiry: float | None,
+) -> tuple[float, str]:
+    """Valeur d'un leg à l'heure dt_et. Identique à _leg_value_today mais clé datetime."""
+    d = dt_et.date()
+    if d >= leg.expiration:
+        return _leg_intrinsic_at_expiry(leg, spot_at_leg_expiry or spot_today), "expired"
+
+    bar = leg_bars.get(dt_et)
+    if bar is not None and bar[0] > 0:
+        return bar[0], "market"
+
+    tte = max(0.0, (leg.expiration - d).days / 365.0)
+    if leg.implied_vol <= 0 or tte <= 0:
+        if leg.option_type == "call":
+            return max(spot_today - leg.strike, 0.0), "theoretical"
+        return max(leg.strike - spot_today, 0.0), "theoretical"
+    return _bs_price(leg.option_type, spot_today, leg.strike, tte, leg.implied_vol, rate), "theoretical"
 
 
 def _closest_bar(
@@ -224,4 +283,91 @@ def backtest_combo(
         ))
 
     cb(1.0, f"Replay terminé ({len(points)} points)")
+    return points
+
+
+def backtest_combo_hourly(
+    combination: Combination,
+    as_of: date,
+    days_forward: int = 30,
+    provider: PolygonHistoricalProvider | None = None,
+    rate: float | None = None,
+    progress_callback: ProgressCb | None = None,
+) -> list[BacktestPoint]:
+    """
+    Replay horaire du P&L de `combination` sur `days_forward` jours après `as_of`.
+    Précision 1h, filtré NYSE (9h-16h ET, lun-ven).
+    Réutilise BacktestPoint avec BacktestPoint.date = datetime ET naive.
+    5 appels API (prefetch range 1h underlying + legs).
+    """
+    if provider is None:
+        provider = PolygonHistoricalProvider()
+    if rate is None:
+        rate = config.DEFAULT_RISK_FREE_RATE
+    cb = progress_callback or (lambda p, m: None)
+
+    underlying = _extract_underlying(combination.legs[0].contract_symbol)
+    net_debit = combination.net_debit if combination.net_debit > 0 else 1e-6
+    last_day = as_of + timedelta(days=days_forward)
+    n_legs = len(combination.legs)
+
+    # ── Pré-fetch barres horaires ────────────────────────────────────────────
+    cb(0.0, f"Pré-fetch underlying {underlying} (horaire {as_of}→{last_day})…")
+    underlying_bars = _prefetch_hourly_range(provider, underlying, as_of, last_day)
+
+    all_leg_bars: dict[str, dict[datetime, tuple[float, int]]] = {}
+    for i, leg in enumerate(combination.legs):
+        cb((i + 1) / (n_legs + 1), f"Pré-fetch {leg.contract_symbol} horaire ({i+1}/{n_legs})…")
+        all_leg_bars[leg.contract_symbol] = _prefetch_hourly_range(
+            provider, leg.contract_symbol, as_of, last_day
+        )
+
+    cb(0.5, "Calcul P&L horaire…")
+
+    # Spot à l'expiration de chaque leg (dernière barre horaire du jour d'expiration)
+    spot_at_leg_expiry: dict[date, float] = {}
+    for leg in combination.legs:
+        if as_of <= leg.expiration <= last_day:
+            day_bars = {dt: v for dt, v in underlying_bars.items()
+                        if dt.date() == leg.expiration}
+            if day_bars:
+                spot_at_leg_expiry[leg.expiration] = day_bars[max(day_bars)][0]
+
+    # ── Replay heure par heure ───────────────────────────────────────────────
+    points: list[BacktestPoint] = []
+    all_dts = sorted(underlying_bars.keys())
+    total = max(len(all_dts), 1)
+
+    for i, dt_et in enumerate(all_dts):
+        cb(0.5 + 0.5 * i / total, f"Replay {dt_et.strftime('%d/%m %Hh')}…")
+
+        spot_today = underlying_bars[dt_et][0]
+        d = dt_et.date()
+
+        leg_values: dict[str, float] = {}
+        leg_modes: dict[str, str] = {}
+        pnl_dollar = 0.0
+
+        for leg in combination.legs:
+            spot_exp = spot_at_leg_expiry.get(leg.expiration)
+            value, mode = _leg_value_hourly(
+                leg, dt_et, spot_today,
+                all_leg_bars[leg.contract_symbol],
+                rate, spot_exp,
+            )
+            leg_values[leg.contract_symbol] = value
+            leg_modes[leg.contract_symbol] = mode
+            pnl_dollar += leg.direction * leg.quantity * (value - leg.entry_price) * 100
+
+        points.append(BacktestPoint(
+            date=dt_et,           # datetime ET naive pour l'axe X horaire
+            spot=spot_today,
+            pnl_dollar=pnl_dollar,
+            pnl_pct=pnl_dollar / net_debit * 100,
+            mode=_aggregate_mode(leg_modes),
+            leg_values=leg_values,
+            leg_modes=leg_modes,
+        ))
+
+    cb(1.0, f"Replay horaire terminé ({len(points)} barres)")
     return points

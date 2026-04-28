@@ -267,3 +267,11 @@
 - [x] docs/specs/option_scanner_spec_v2.md — version FEAT-014 + roadmap V2/V3 mise à jour
 - [x] backtesting/replay.py — pré-fetch plage complète en 1 appel/ticker (BUG-007 : 429 en rafale)
 - [ ] validation utilisateur sur ANQA (URL : http://192.168.0.133:8501)
+
+## FEAT-016 — Replay horaire (précision 1h)
+
+- [x] FEAT-016-1 : backtesting/replay.py — `_prefetch_hourly_range` + `backtest_combo_hourly` (barres 1h, prefetch range en 1 appel/ticker)
+- [x] FEAT-016-2 : backtesting/replay.py — filtrage NYSE : 9h-16h ET (barres 9h-15h inclus), lun-ven
+- [x] FEAT-016-3 : ui/page_backtest.py — 2e bouton "Lancer le replay (précision horaire)" + `_plot_replay_hourly` avec rangeslider Plotly (zoom initial 5j)
+- [x] FEAT-016-4 : ui/page_backtest.py — slider jours par défaut = (combo.close_date - as_of).days
+- [x] FEAT-016-5 : ui/page_backtest.py — arrondis 2 décimales dans tous les affichages replay (hover, métriques, tableau)

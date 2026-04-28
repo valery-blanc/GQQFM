@@ -1,3 +1,3 @@
 """Module de backtesting historique via Polygon.io."""
 
-from backtesting.replay import BacktestPoint, backtest_combo
+from backtesting.replay import BacktestPoint, backtest_combo, backtest_combo_hourly

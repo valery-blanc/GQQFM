@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import config
-from backtesting import backtest_combo
+from backtesting import backtest_combo, backtest_combo_hourly
 from data.provider_polygon import PolygonHistoricalProvider, resolve_polygon_key
 from engine.backend import to_cpu, xp
 from engine.combinator import generate_combinations
@@ -245,13 +245,93 @@ def _plot_replay(points, combo, as_of: date) -> go.Figure:
             )
 
     fig.update_layout(
-        title=f"Backtest replay — entrée {as_of.strftime('%d %b %Y')}",
+        title=f"Backtest replay (journalier) — entrée {as_of.strftime('%d %b %Y')}",
         template="plotly_dark",
         xaxis=dict(title="Date"),
         yaxis=dict(title="P&L (% net debit)", ticksuffix="%"),
         yaxis2=dict(title="Spot ($)", overlaying="y", side="right", showgrid=False),
         hovermode="x unified",
         height=600,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    return fig
+
+
+def _plot_replay_hourly(points, combo, as_of) -> go.Figure:
+    """Graphe Plotly du P&L heure par heure avec rangeslider horizontal."""
+    dts = [p.date for p in points]   # datetime ET naive
+    pnl_pct = [p.pnl_pct for p in points]
+    pnl_dollar = [p.pnl_dollar for p in points]
+    spots = [p.spot for p in points]
+    modes = [p.mode for p in points]
+
+    color_map = {
+        "market": "#00CC96",
+        "expired": "#636EFA",
+        "theoretical": "#FFA15A",
+        "mixed": "#FFA15A",
+    }
+    colors = [color_map.get(m, "#888") for m in modes]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=dts, y=pnl_pct, mode="lines",
+        line=dict(color="#636EFA", width=1.5),
+        name="P&L %",
+        customdata=np.stack([pnl_dollar, spots, modes], axis=1),
+        hovertemplate="%{x|%d %b %Hh%M}<br>P&L: %{y:+.2f}% ($%{customdata[0]:+,.2f})<br>"
+                      "Spot: $%{customdata[1]:.2f}<br>Mode: %{customdata[2]}<extra></extra>",
+        yaxis="y",
+    ))
+    fig.add_trace(go.Scatter(
+        x=dts, y=pnl_pct, mode="markers",
+        marker=dict(color=colors, size=4),
+        showlegend=False, hoverinfo="skip", yaxis="y",
+    ))
+    fig.add_trace(go.Scatter(
+        x=dts, y=spots, mode="lines",
+        line=dict(color="rgba(150,150,150,0.5)", width=1, dash="dot"),
+        name="Spot ($)", yaxis="y2",
+    ))
+    fig.add_hline(y=0, line=dict(color="gray", dash="dash", width=1))
+
+    for leg in combo.legs:
+        if as_of <= leg.expiration:
+            label = f"{'L' if leg.direction == 1 else 'S'} {leg.option_type[0].upper()} K{leg.strike:g}"
+            from datetime import datetime as _dt
+            x_dt = _dt(leg.expiration.year, leg.expiration.month, leg.expiration.day, 16, 0)
+            fig.add_vline(x=x_dt, line=dict(color="orange", dash="dot", width=1))
+            fig.add_annotation(
+                x=x_dt, y=1.02, yref="paper",
+                text=f"exp {label}",
+                showarrow=False,
+                font=dict(size=12, color="orange"),
+                textangle=-90,
+                xanchor="center",
+            )
+
+    # Zoom initial : 5 premiers jours de trading
+    if dts:
+        x_start = dts[0]
+        unique_days = sorted(set(d.date() for d in dts))
+        x_end_day = unique_days[min(4, len(unique_days) - 1)]
+        from datetime import datetime as _dt
+        x_end = _dt(x_end_day.year, x_end_day.month, x_end_day.day, 16, 0)
+    else:
+        x_start = x_end = None
+
+    fig.update_layout(
+        title=f"Backtest replay (horaire) — entrée {as_of.strftime('%d %b %Y')}",
+        template="plotly_dark",
+        xaxis=dict(
+            title="Date / Heure (ET)",
+            rangeslider=dict(visible=True, thickness=0.06),
+            range=[x_start, x_end] if x_start else None,
+        ),
+        yaxis=dict(title="P&L (% net debit)", ticksuffix="%"),
+        yaxis2=dict(title="Spot ($)", overlaying="y", side="right", showgrid=False),
+        hovermode="x unified",
+        height=650,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     return fig
@@ -360,14 +440,22 @@ def render_backtest_page(params: dict) -> None:
         days_before_close=results.get("days_before_close", 3),
     )
 
-    # ── Replay 30 jours ──────────────────────────────────────────────────────
+    # ── Replay ───────────────────────────────────────────────────────────────
     st.markdown("---")
-    st.subheader("Replay historique 30 jours")
+    st.subheader("Replay historique")
 
-    days_forward = st.slider("Jours à replayer", 5, 60, 30, 5, key="bt_days_forward")
+    # Défaut = jours restants jusqu'à l'expiration des jambes courtes
+    default_days = max(5, min(60, (combo.close_date - as_of).days))
+    days_forward = st.slider("Jours à replayer", 5, 60, default_days, 1, key="bt_days_forward")
 
-    if st.button("Lancer le replay sur cette combo", type="primary"):
-        bar = st.progress(0.0, text="Replay…")
+    col_b1, col_b2 = st.columns(2)
+    launch_daily = col_b1.button("Lancer le replay (précision journalière)", type="primary",
+                                  use_container_width=True)
+    launch_hourly = col_b2.button("Lancer le replay (précision horaire)", type="secondary",
+                                   use_container_width=True)
+
+    if launch_daily:
+        bar = st.progress(0.0, text="Replay journalier…")
         status = st.empty()
         cb = _make_progress_callback(bar, status)
         try:
@@ -376,19 +464,39 @@ def render_backtest_page(params: dict) -> None:
                 provider=results["provider"], rate=params["risk_free_rate"],
                 progress_callback=cb,
             )
-            st.session_state.bt_replay = points
+            st.session_state.bt_replay = ("daily", points)
         except Exception as exc:
             st.error(f"Erreur replay : {exc}")
         finally:
             bar.empty()
             status.empty()
 
-    points = st.session_state.bt_replay
-    if points:
-        replay_fig = _plot_replay(points, combo, as_of)
+    if launch_hourly:
+        bar = st.progress(0.0, text="Replay horaire…")
+        status = st.empty()
+        cb = _make_progress_callback(bar, status)
+        try:
+            points = backtest_combo_hourly(
+                combo, as_of=as_of, days_forward=days_forward,
+                provider=results["provider"], rate=params["risk_free_rate"],
+                progress_callback=cb,
+            )
+            st.session_state.bt_replay = ("hourly", points)
+        except Exception as exc:
+            st.error(f"Erreur replay horaire : {exc}")
+        finally:
+            bar.empty()
+            status.empty()
+
+    replay_state = st.session_state.bt_replay
+    if replay_state:
+        replay_mode, points = replay_state
+        if replay_mode == "hourly":
+            replay_fig = _plot_replay_hourly(points, combo, as_of)
+        else:
+            replay_fig = _plot_replay(points, combo, as_of)
         st.plotly_chart(replay_fig, use_container_width=True)
 
-        # Tableau résumé
         final = points[-1]
         peak = max(points, key=lambda p: p.pnl_dollar)
         trough = min(points, key=lambda p: p.pnl_dollar)
@@ -399,10 +507,12 @@ def render_backtest_page(params: dict) -> None:
         col3.metric("Worst P&L", f"${trough.pnl_dollar:+,.2f}",
                     f"{trough.pnl_pct:+.2f}% @ {trough.date.strftime('%d/%m')}")
 
-        with st.expander("Détail jour par jour"):
+        label_col = "Date/Heure" if replay_mode == "hourly" else "Date"
+        with st.expander(f"Détail {'heure par heure' if replay_mode == 'hourly' else 'jour par jour'}"):
             import pandas as pd
+            fmt = "%d/%m %Hh%M" if replay_mode == "hourly" else "%Y-%m-%d"
             df = pd.DataFrame([{
-                "Date": p.date.isoformat(),
+                label_col: p.date.strftime(fmt),
                 "Spot": f"${p.spot:.2f}",
                 "P&L $": f"{p.pnl_dollar:+,.2f}",
                 "P&L %": f"{p.pnl_pct:+.2f}%",
