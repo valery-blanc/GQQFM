@@ -314,3 +314,16 @@
 - [x] BUG-014 : pagination next_url manquante dans _prefetch_hourly_range (tronquait à 86 barres)
 - [x] docs/bugs/BUG-010-014-replay-fixes.md
 - [x] validation utilisateur sur ANQA — OK (2026-04-28)
+
+## FEAT-019 — Tracker de prix réels (Avignon Docker)
+
+- [ ] data/tracked_combos.json — fichier de config versionné (liste des combos trackés)
+- [ ] tracker/collector.py — collecte Polygon snapshot toutes les 30min (bid/ask/mid/spot/iv)
+- [ ] tracker/api.py — FastAPI REST : /health /combos /prices/{id} /pnl/{id}
+- [ ] tracker/main.py — scheduler APScheduler + git pull 5min + uvicorn
+- [ ] tracker/Dockerfile + requirements.txt + docker-compose.yml
+- [ ] .gitignore — exclure tracker/data/tracker.db
+- [ ] ui/page_tracker.py — liste combos + suppression + graphe comparaison replay vs réel
+- [ ] ui/components/combo_detail.py — bouton "Tracker ce combo"
+- [ ] ui/app.py — routing page tracker dans sidebar
+- [ ] Déploiement sur Avignon (~/docker/gqqfm-tracker/)

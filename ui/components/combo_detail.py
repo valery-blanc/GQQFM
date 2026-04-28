@@ -1,6 +1,6 @@
 """Vue détaillée d'une combinaison sélectionnée."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import numpy as np
 import streamlit as st
@@ -163,3 +163,72 @@ def render_combo_detail(
 
     import pandas as pd
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    # ── Bouton tracker ──────────────────────────────────────────────────────
+    _render_tracker_button(combination, symbol, as_of)
+
+
+def _render_tracker_button(
+    combination: Combination,
+    symbol: str | None,
+    as_of: date | None,
+) -> None:
+    """Ajoute le combo à tracked_combos.json + git push."""
+    import hashlib, json, subprocess
+    from pathlib import Path
+
+    COMBOS_PATH = Path(__file__).parent.parent.parent / "data" / "tracked_combos.json"
+    combo_id = hashlib.md5(
+        "".join(l.contract_symbol for l in combination.legs).encode()
+    ).hexdigest()[:12]
+
+    # Vérifier si déjà tracké
+    existing = json.loads(COMBOS_PATH.read_text()).get("combos", []) \
+        if COMBOS_PATH.exists() else []
+    already = any(c["id"] == combo_id for c in existing)
+
+    label = "✓ Déjà tracké" if already else "Tracker ce combo (prix réels)"
+    if st.button(label, disabled=already, key=f"track_{combo_id}"):
+        entry = {
+            "id": combo_id,
+            "symbol": symbol or combination.legs[0].contract_symbol[2:-15],
+            "as_of": as_of.isoformat() if as_of else date.today().isoformat(),
+            "tracked_since": datetime.now().isoformat(),
+            "net_debit": float(combination.net_debit),
+            "legs": [
+                {
+                    "contract_symbol": l.contract_symbol,
+                    "direction": int(l.direction),
+                    "quantity": int(l.quantity),
+                    "option_type": l.option_type,
+                    "strike": float(l.strike),
+                    "expiration": l.expiration.isoformat(),
+                    "entry_price": float(l.entry_price),
+                    "implied_vol": float(l.implied_vol),
+                }
+                for l in combination.legs
+            ],
+        }
+        existing.append(entry)
+        COMBOS_PATH.write_text(json.dumps({"combos": existing}, indent=2, default=str))
+
+        # Auto-commit + push
+        repo = str(COMBOS_PATH.parent.parent)
+        try:
+            subprocess.run(["git", "-C", repo, "add", str(COMBOS_PATH)],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", repo, "commit", "-m",
+                            f"tracker: add {entry['symbol']} {combo_id}"],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", repo, "push", "origin", "master"],
+                           check=True, capture_output=True)
+            st.success(
+                f"Combo ajouté au tracker (id: `{combo_id}`). "
+                "Le container Avignon récupèrera la MAJ dans ≤5 min."
+            )
+        except subprocess.CalledProcessError as e:
+            st.warning(
+                f"Sauvegardé localement mais git push a échoué : "
+                f"{e.stderr.decode()[:150]}. Lance `git push` manuellement."
+            )
+        st.rerun()

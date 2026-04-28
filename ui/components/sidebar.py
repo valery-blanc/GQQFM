@@ -124,7 +124,7 @@ def render_sidebar() -> dict:
     from datetime import date as _date_today, timedelta as _td
     mode = st.sidebar.radio(
         "Mode",
-        options=["Live (yfinance)", "Backtest (Polygon historique)"],
+        options=["Live (yfinance)", "Backtest (Polygon historique)", "Tracker (prix réels)"],
         index=0,
         help=(
             "**Live** : scan en temps réel via Yahoo Finance.\n\n"
@@ -134,6 +134,7 @@ def render_sidebar() -> dict:
         ),
     )
     is_backtest = mode.startswith("Backtest")
+    is_tracker  = mode.startswith("Tracker")
     as_of: date | None = None
     scan_time: str | None = None
     if is_backtest:
@@ -303,7 +304,7 @@ def render_sidebar() -> dict:
     )
 
     return {
-        "mode": "backtest" if is_backtest else "live",
+        "mode": "tracker" if is_tracker else ("backtest" if is_backtest else "live"),
         "as_of": as_of,
         "scan_time": scan_time,
         "symbols": symbols,

@@ -19,3 +19,7 @@ polygon.key
 # Cache local Polygon (peut faire plusieurs MB)
 data/.polygon_cache.db
 *.db-journal
+
+# Tracker DB (données collectées sur Avignon, non versionnées)
+tracker/data/tracker.db
+data/tracker.db

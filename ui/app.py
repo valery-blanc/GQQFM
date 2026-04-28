@@ -260,10 +260,15 @@ def main():
 
     params = render_sidebar()
 
-    # Routage Live / Backtest
+    # Routage Live / Backtest / Tracker
     if params.get("mode") == "backtest":
         from ui.page_backtest import render_backtest_page
         render_backtest_page(params)
+        return
+
+    if params.get("mode") == "tracker":
+        from ui.page_tracker import render_tracker_page
+        render_tracker_page()
         return
 
     # État de session
