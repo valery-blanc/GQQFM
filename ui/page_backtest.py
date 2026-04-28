@@ -188,37 +188,87 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
     }
 
 
-def _plot_replay(points, combo, as_of: date) -> go.Figure:
-    """Graphe Plotly du P&L jour par jour avec couleur par mode."""
-    dates = [p.date for p in points]
-    pnl_pct = [p.pnl_pct for p in points]
-    pnl_dollar = [p.pnl_dollar for p in points]
-    spots = [p.spot for p in points]
-    modes = [p.mode for p in points]
+def _replay_y_config(points, combo):
+    """
+    Détermine si on affiche en % net debit ou en $ (quand net_debit ≈ 0).
+    Retourne (y_vals, y_label, y_tick_fmt, y_tick_suffix, hover_y, hover_secondary).
+    Toutes les valeurs hover sont pré-formatées en strings pour éviter les bugs
+    de format specifier de Plotly en mode unified hover.
+    """
+    net_debit = combo.net_debit
+    use_dollar = abs(net_debit) < 1.0  # coût quasi-nul → % sans sens
 
-    color_map = {
-        "market": "#00CC96",
-        "expired": "#636EFA",
-        "theoretical": "#FFA15A",
-        "mixed": "#FFA15A",
-    }
+    if use_dollar:
+        y_vals = [p.pnl_dollar for p in points]
+        hover_y    = [f"${p.pnl_dollar:+,.2f}" for p in points]
+        hover_sec  = ["N/A" for _ in points]
+        y_label    = "P&L ($)"
+        y_tick_fmt = ",.2f"
+        y_tick_sfx = ""
+    else:
+        y_vals = [p.pnl_pct for p in points]
+        hover_y    = [f"{p.pnl_pct:+.2f}%" for p in points]
+        hover_sec  = [f"${p.pnl_dollar:+,.2f}" for p in points]
+        y_label    = "P&L (% net debit)"
+        y_tick_fmt = ".2f"
+        y_tick_sfx = "%"
+
+    spots_fmt = [f"${p.spot:.2f}" for p in points]
+    return y_vals, y_label, y_tick_fmt, y_tick_sfx, hover_y, hover_sec, spots_fmt
+
+
+def _add_expiry_vlines(fig, combo, as_of, last_x, is_hourly=False):
+    """Ajoute les barres verticales d'expiration de legs."""
+    from datetime import datetime as _dt
+    for leg in combo.legs:
+        if is_hourly:
+            if as_of > leg.expiration:
+                continue
+            x_val = _dt(leg.expiration.year, leg.expiration.month, leg.expiration.day, 16, 0)
+        else:
+            if not (as_of <= leg.expiration <= last_x):
+                continue
+            x_val = leg.expiration.isoformat()
+        label = f"{'L' if leg.direction == 1 else 'S'} {leg.option_type[0].upper()} K{leg.strike:g}"
+        fig.add_vline(x=x_val, line=dict(color="orange", dash="dot", width=1))
+        fig.add_annotation(
+            x=x_val, y=1.02, yref="paper",
+            text=f"exp {label}",
+            showarrow=False,
+            font=dict(size=12, color="orange"),
+            textangle=-90,
+            xanchor="center",
+        )
+
+
+def _plot_replay(points, combo, as_of: date) -> go.Figure:
+    """Graphe Plotly du P&L jour par jour."""
+    color_map = {"market": "#00CC96", "expired": "#636EFA",
+                 "theoretical": "#FFA15A", "mixed": "#FFA15A"}
+    dates  = [p.date for p in points]
+    spots  = [p.spot  for p in points]
+    modes  = [p.mode  for p in points]
     colors = [color_map.get(m, "#888") for m in modes]
 
-    fig = go.Figure()
+    y_vals, y_label, y_tick_fmt, y_tick_sfx, hover_y, hover_sec, spots_fmt = \
+        _replay_y_config(points, combo)
 
+    # customdata = liste de strings pré-formatées (pas de format specifier dans hovertemplate)
+    customdata = list(zip(hover_y, hover_sec, spots_fmt, modes))
+
+    fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=dates, y=pnl_pct, mode="lines",
+        x=dates, y=y_vals, mode="lines",
         line=dict(color="#636EFA", width=2),
-        name="P&L %",
-        customdata=np.stack([pnl_dollar, spots, modes], axis=1),
-        hovertemplate="%{x|%d %b %Y}<br>P&L: %{y:+.2f}% ($%{customdata[0]:+,.2f})<br>"
-                      "Spot: $%{customdata[1]:.2f}<br>Mode: %{customdata[2]}<extra></extra>",
-        yaxis="y",
+        name=y_label,
+        customdata=customdata,
+        hovertemplate="%{x|%d %b %Y}<br>P&L: %{customdata[0]} (%{customdata[1]})<br>"
+                      "Spot: %{customdata[2]}<br>Mode: %{customdata[3]}<extra></extra>",
     ))
     fig.add_trace(go.Scatter(
-        x=dates, y=pnl_pct, mode="markers",
+        x=dates, y=y_vals, mode="markers",
         marker=dict(color=colors, size=7),
-        showlegend=False, hoverinfo="skip", yaxis="y",
+        showlegend=False, hoverinfo="skip",
     ))
     fig.add_trace(go.Scatter(
         x=dates, y=spots, mode="lines",
@@ -226,32 +276,13 @@ def _plot_replay(points, combo, as_of: date) -> go.Figure:
         name="Spot ($)", yaxis="y2",
     ))
     fig.add_hline(y=0, line=dict(color="gray", dash="dash", width=1))
-
-    # Marqueurs verticaux pour chaque expiration de leg
-    # Note: add_vline + annotation_text déclenche _mean(X) dans Plotly qui plante
-    # sur un axe date — on sépare le trait et l'annotation.
-    for leg in combo.legs:
-        if as_of <= leg.expiration <= dates[-1]:
-            label = f"{'L' if leg.direction == 1 else 'S'} {leg.option_type[0].upper()} K{leg.strike:g}"
-            x_iso = leg.expiration.isoformat()
-            fig.add_vline(x=x_iso, line=dict(color="orange", dash="dot", width=1))
-            fig.add_annotation(
-                x=x_iso, y=1.02, yref="paper",
-                text=f"exp {label}",
-                showarrow=False,
-                font=dict(size=13, color="orange"),
-                textangle=-90,
-                xanchor="center",
-            )
+    _add_expiry_vlines(fig, combo, as_of, dates[-1] if dates else as_of)
 
     fig.update_layout(
         title=f"Backtest replay (journalier) — entrée {as_of.strftime('%d %b %Y')}",
         template="plotly_dark",
-        xaxis=dict(
-            title="Date",
-            rangebreaks=[dict(bounds=["sat", "mon"])],
-        ),
-        yaxis=dict(title="P&L (% net debit)", ticksuffix="%", tickformat=".2f"),
+        xaxis=dict(title="Date", rangebreaks=[dict(bounds=["sat", "mon"])]),
+        yaxis=dict(title=y_label, ticksuffix=y_tick_sfx, tickformat=y_tick_fmt),
         yaxis2=dict(title="Spot ($)", overlaying="y", side="right",
                     showgrid=False, tickformat=",.2f"),
         hovermode="x unified",
@@ -263,34 +294,32 @@ def _plot_replay(points, combo, as_of: date) -> go.Figure:
 
 def _plot_replay_hourly(points, combo, as_of) -> go.Figure:
     """Graphe Plotly du P&L heure par heure avec rangeslider horizontal."""
-    dts = [p.date for p in points]   # datetime ET naive
-    pnl_pct = [p.pnl_pct for p in points]
-    pnl_dollar = [p.pnl_dollar for p in points]
-    spots = [p.spot for p in points]
-    modes = [p.mode for p in points]
-
-    color_map = {
-        "market": "#00CC96",
-        "expired": "#636EFA",
-        "theoretical": "#FFA15A",
-        "mixed": "#FFA15A",
-    }
+    from datetime import datetime as _dt
+    color_map = {"market": "#00CC96", "expired": "#636EFA",
+                 "theoretical": "#FFA15A", "mixed": "#FFA15A"}
+    dts    = [p.date for p in points]
+    spots  = [p.spot  for p in points]
+    modes  = [p.mode  for p in points]
     colors = [color_map.get(m, "#888") for m in modes]
+
+    y_vals, y_label, y_tick_fmt, y_tick_sfx, hover_y, hover_sec, spots_fmt = \
+        _replay_y_config(points, combo)
+
+    customdata = list(zip(hover_y, hover_sec, spots_fmt, modes))
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=dts, y=pnl_pct, mode="lines",
+        x=dts, y=y_vals, mode="lines",
         line=dict(color="#636EFA", width=1.5),
-        name="P&L %",
-        customdata=np.stack([pnl_dollar, spots, modes], axis=1),
-        hovertemplate="%{x|%d %b %Hh%M}<br>P&L: %{y:+.2f}% ($%{customdata[0]:+,.2f})<br>"
-                      "Spot: $%{customdata[1]:.2f}<br>Mode: %{customdata[2]}<extra></extra>",
-        yaxis="y",
+        name=y_label,
+        customdata=customdata,
+        hovertemplate="%{x|%d %b %Hh%M}<br>P&L: %{customdata[0]} (%{customdata[1]})<br>"
+                      "Spot: %{customdata[2]}<br>Mode: %{customdata[3]}<extra></extra>",
     ))
     fig.add_trace(go.Scatter(
-        x=dts, y=pnl_pct, mode="markers",
+        x=dts, y=y_vals, mode="markers",
         marker=dict(color=colors, size=4),
-        showlegend=False, hoverinfo="skip", yaxis="y",
+        showlegend=False, hoverinfo="skip",
     ))
     fig.add_trace(go.Scatter(
         x=dts, y=spots, mode="lines",
@@ -298,28 +327,13 @@ def _plot_replay_hourly(points, combo, as_of) -> go.Figure:
         name="Spot ($)", yaxis="y2",
     ))
     fig.add_hline(y=0, line=dict(color="gray", dash="dash", width=1))
-
-    for leg in combo.legs:
-        if as_of <= leg.expiration:
-            label = f"{'L' if leg.direction == 1 else 'S'} {leg.option_type[0].upper()} K{leg.strike:g}"
-            from datetime import datetime as _dt
-            x_dt = _dt(leg.expiration.year, leg.expiration.month, leg.expiration.day, 16, 0)
-            fig.add_vline(x=x_dt, line=dict(color="orange", dash="dot", width=1))
-            fig.add_annotation(
-                x=x_dt, y=1.02, yref="paper",
-                text=f"exp {label}",
-                showarrow=False,
-                font=dict(size=12, color="orange"),
-                textangle=-90,
-                xanchor="center",
-            )
+    _add_expiry_vlines(fig, combo, as_of, None, is_hourly=True)
 
     # Zoom initial : 5 premiers jours de trading
     if dts:
         x_start = dts[0]
         unique_days = sorted(set(d.date() for d in dts))
         x_end_day = unique_days[min(4, len(unique_days) - 1)]
-        from datetime import datetime as _dt
         x_end = _dt(x_end_day.year, x_end_day.month, x_end_day.day, 16, 0)
     else:
         x_start = x_end = None
@@ -332,11 +346,11 @@ def _plot_replay_hourly(points, combo, as_of) -> go.Figure:
             rangeslider=dict(visible=True, thickness=0.06),
             range=[x_start, x_end] if x_start else None,
             rangebreaks=[
-                dict(bounds=["sat", "mon"]),           # masque weekends
-                dict(bounds=[16, 9], pattern="hour"),  # masque 16h-9h
+                dict(bounds=["sat", "mon"]),
+                dict(bounds=[16, 9], pattern="hour"),
             ],
         ),
-        yaxis=dict(title="P&L (% net debit)", ticksuffix="%", tickformat=".2f"),
+        yaxis=dict(title=y_label, ticksuffix=y_tick_sfx, tickformat=y_tick_fmt),
         yaxis2=dict(title="Spot ($)", overlaying="y", side="right",
                     showgrid=False, tickformat=",.2f"),
         hovermode="x unified",
@@ -384,7 +398,6 @@ def render_backtest_page(params: dict) -> None:
             st.session_state.bt_results = result
             st.session_state.bt_replay = None
             st.session_state.bt_selected_idx = 0
-            st.session_state.pop("bt_days_forward", None)  # force recalcul défaut
         except Exception as exc:
             st.error(f"Erreur scan : {exc}")
             st.session_state.bt_results = None
@@ -438,7 +451,6 @@ def render_backtest_page(params: dict) -> None:
     if selected is not None and selected != idx:
         st.session_state.bt_selected_idx = selected
         st.session_state.bt_replay = None
-        st.session_state.pop("bt_days_forward", None)  # recalcule le défaut pour ce combo
         st.rerun()
 
     st.markdown("---")
@@ -455,9 +467,10 @@ def render_backtest_page(params: dict) -> None:
     st.markdown("---")
     st.subheader("Replay historique")
 
-    # Défaut = jours restants jusqu'à l'expiration des jambes courtes
+    # Clé unique par combo : force le défaut à se recalculer à chaque changement de combo
     default_days = max(5, min(60, (combo.close_date - as_of).days))
-    days_forward = st.slider("Jours à replayer", 5, 60, default_days, 1, key="bt_days_forward")
+    slider_key = f"bt_days_{idx}_{combo.close_date}"
+    days_forward = st.slider("Jours à replayer", 5, 60, default_days, 1, key=slider_key)
 
     col_b1, col_b2 = st.columns(2)
     launch_daily = col_b1.button("Lancer le replay (précision journalière)", type="primary",
