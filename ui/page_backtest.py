@@ -127,7 +127,7 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
         return {
             "combinations": [], "metrics": [], "n_tested": len(all_combinations),
             "n_found": 0, "gpu_time_s": time.perf_counter() - t_start,
-            "spot": spot, "spot_range": to_cpu(spot_range),
+            "spot": spot, "spots": [spot], "spot_range": to_cpu(spot_range),
         }
 
     filtered_combos = [all_combinations[i] for i in valid_indices_cpu]
