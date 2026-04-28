@@ -329,22 +329,17 @@ def _plot_replay_hourly(points, combo, as_of) -> go.Figure:
     fig.add_hline(y=0, line=dict(color="gray", dash="dash", width=1))
     _add_expiry_vlines(fig, combo, as_of, None, is_hourly=True)
 
-    # Zoom initial : 5 premiers jours de trading
-    if dts:
-        x_start = dts[0]
-        unique_days = sorted(set(d.date() for d in dts))
-        x_end_day = unique_days[min(4, len(unique_days) - 1)]
-        x_end = _dt(x_end_day.year, x_end_day.month, x_end_day.day, 16, 0)
-    else:
-        x_start = x_end = None
+    n_days = len(set(d.date() for d in dts)) if dts else 0
+    date_range = f"{dts[0].strftime('%d/%m')} → {dts[-1].strftime('%d/%m/%Y')}" if dts else "—"
 
     fig.update_layout(
-        title=f"Backtest replay (horaire) — entrée {as_of.strftime('%d %b %Y')}",
+        title=f"Backtest replay (horaire) — entrée {as_of.strftime('%d %b %Y')} "
+              f"| {len(dts)} barres / {n_days} jours ({date_range})",
         template="plotly_dark",
         xaxis=dict(
-            title="Date / Heure (ET)",
-            rangeslider=dict(visible=True, thickness=0.06),
-            range=[x_start, x_end] if x_start else None,
+            title="Date / Heure (ET) — utilisez le rangeslider en bas pour zoomer",
+            rangeslider=dict(visible=True, thickness=0.08),
+            # Pas de zoom initial : toutes les données visibles d'emblée
             rangebreaks=[
                 dict(bounds=["sat", "mon"]),
                 dict(bounds=[16, 9], pattern="hour"),
