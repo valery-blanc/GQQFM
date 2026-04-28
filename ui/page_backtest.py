@@ -284,7 +284,7 @@ def _plot_replay(points, combo, as_of: date) -> go.Figure:
     ))
     fig.add_trace(go.Scatter(
         x=dates, y=spots, mode="lines",
-        line=dict(color="rgba(150,150,150,0.5)", width=1, dash="dot"),
+        line=dict(color="#FFD700", width=2),
         name="Spot ($)", yaxis="y2",
     ))
     fig.add_hline(y=0, line=dict(color="gray", dash="dash", width=1))
@@ -335,7 +335,7 @@ def _plot_replay_hourly(points, combo, as_of) -> go.Figure:
     ))
     fig.add_trace(go.Scatter(
         x=dts, y=spots, mode="lines",
-        line=dict(color="rgba(150,150,150,0.5)", width=1, dash="dot"),
+        line=dict(color="#FFD700", width=2),
         name="Spot ($)", yaxis="y2",
     ))
     fig.add_hline(y=0, line=dict(color="gray", dash="dash", width=1))
@@ -349,19 +349,19 @@ def _plot_replay_hourly(points, combo, as_of) -> go.Figure:
               f"| {len(dts)} barres / {n_days} jours ({date_range})",
         template="plotly_dark",
         xaxis=dict(
-            title="Date / Heure (ET) — utilisez le rangeslider en bas pour zoomer",
-            rangeslider=dict(visible=True, thickness=0.08),
-            # Pas de zoom initial : toutes les données visibles d'emblée
+            title="Date / Heure (ET)",
+            rangeslider=dict(visible=True, thickness=0.04),
             rangebreaks=[
                 dict(bounds=["sat", "mon"]),
                 dict(bounds=[16, 9], pattern="hour"),
             ],
         ),
-        yaxis=dict(title=y_label, ticksuffix=y_tick_sfx, tickformat=y_tick_fmt),
+        yaxis=dict(title=y_label, ticksuffix=y_tick_sfx, tickformat=y_tick_fmt,
+                   domain=[0.06, 1.0]),
         yaxis2=dict(title="Spot ($)", overlaying="y", side="right",
                     showgrid=False, tickformat=",.2f"),
         hovermode="x unified",
-        height=650,
+        height=680,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     return fig

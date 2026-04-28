@@ -177,7 +177,7 @@ def render_sidebar() -> dict:
     st.sidebar.subheader("Templates")
     selected_templates = []
     for name, tmpl in ALL_TEMPLATES.items():
-        checked = st.sidebar.checkbox(tmpl.description, value=(name == "calendar_strangle"), key=f"tmpl_{name}")
+        checked = st.sidebar.checkbox(tmpl.description, value=True, key=f"tmpl_{name}")
         if checked:
             selected_templates.append(name)
 
@@ -224,7 +224,7 @@ def render_sidebar() -> dict:
         rfr_label = "✓ ^IRX live" if rfr_source == "live" else "⚠ fallback constante"
         st.caption(f"{rfr_label} — {rfr_default * 100:.3f} %")
         max_combinations = st.number_input(
-            "Max combinaisons", value=100_000, min_value=1_000, max_value=500_000,
+            "Max combinaisons", value=400_000, min_value=1_000, max_value=500_000,
             step=10_000,
             help="Réduire pour accélérer en mode CPU. GPU peut gérer 500K."
         )
