@@ -358,6 +358,7 @@ def _plot_replay_hourly(points, combo, as_of, resolution: str = "1h") -> go.Figu
         template="plotly_dark",
         xaxis=dict(
             title="Date / Heure (ET)",
+            range=[dts[0], dts[-1]] if dts else None,
             rangeslider=dict(visible=True, thickness=0.04),
             rangebreaks=rbreaks,
         ),
