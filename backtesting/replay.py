@@ -74,16 +74,17 @@ def _prefetch_hourly_range(
     to_date: date,
 ) -> dict[datetime, tuple[float, int]]:
     """
-    Fetche toutes les barres 1h pour [from_date, to_date] en un seul appel.
+    Fetche toutes les barres 1h pour [from_date, to_date] en suivant la pagination.
+    Polygon retourne ~86 barres par page même avec limit=5000 — _paginated suit next_url.
     Filtre NYSE : lun-ven, 9h-15h ET (session régulière).
     Retourne {datetime_et_naive: (close, volume)}.
     """
-    data = provider._get(
+    all_bars = provider._paginated(
         f"/v2/aggs/ticker/{ticker}/range/1/hour/{from_date.isoformat()}/{to_date.isoformat()}",
-        params={"limit": 5000},
+        {"limit": 5000},
     )
     result: dict[datetime, tuple[float, int]] = {}
-    for bar in data.get("results", []):
+    for bar in all_bars:
         dt_utc = datetime.fromtimestamp(bar["t"] / 1000, tz=timezone.utc)
         dt_et = dt_utc.astimezone(_ET)
         if dt_et.weekday() >= 5:
