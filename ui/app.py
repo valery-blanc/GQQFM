@@ -74,7 +74,8 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
         config.NUM_SPOT_POINTS,
         dtype=xp.float32,
     )
-    tensor = combinations_to_tensor(all_combinations)
+    tensor = combinations_to_tensor(all_combinations,
+                                    days_before_close=params.get("days_before_close", 3))
 
     # 4. Calcul P&L batch
     pnl_tensor = compute_pnl_batch(
@@ -185,6 +186,7 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
         "pnl_tensor": pnl_filtered_np,   # (V, C_f, M) numpy
         "spot_range": to_cpu(spot_range),
         "spot": spot,
+        "days_before_close": params.get("days_before_close", 3),
     }
 
 
@@ -330,6 +332,7 @@ def main():
         pnl_tensor=pnl_for_combo,
         spot_range=results["spot_ranges"][idx],
         current_spot=results["spots"][idx],
+        days_before_close=results.get("days_before_close", 3),
     )
 
 

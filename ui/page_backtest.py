@@ -92,7 +92,8 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
         config.NUM_SPOT_POINTS,
         dtype=xp.float32,
     )
-    tensor = combinations_to_tensor(all_combinations)
+    tensor = combinations_to_tensor(all_combinations,
+                                    days_before_close=params.get("days_before_close", 3))
     pnl_tensor = compute_pnl_batch(
         tensor, spot_range, vol_scenarios, rfr,
         use_american_pricer=params.get("use_american_pricer", True),
@@ -183,6 +184,7 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
         "symbols": [symbol] * len(filtered_combos),
         "as_of": as_of,
         "provider": provider,
+        "days_before_close": params.get("days_before_close", 3),
     }
 
 
@@ -356,6 +358,7 @@ def render_backtest_page(params: dict) -> None:
         spot_range=results["spot_ranges"][idx],
         current_spot=results["spots"][idx],
         as_of=as_of,
+        days_before_close=results.get("days_before_close", 3),
     )
 
     # ── Replay 30 jours ──────────────────────────────────────────────────────

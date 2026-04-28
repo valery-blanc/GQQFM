@@ -17,6 +17,7 @@ def _render_exit_plan(
     spot_range: np.ndarray,
     current_spot: float,
     as_of: date | None = None,
+    days_before_close: int = 3,
 ) -> None:
     """Affiche les seuils de sortie calibrés sur la courbe P&L réelle."""
     net_debit = combination.net_debit
@@ -37,7 +38,7 @@ def _render_exit_plan(
     max_loss_pct = metrics["max_loss_pct"]   # négatif
     stop_dollar = max_loss_pct / 100 * net_debit
 
-    deadline = combination.close_date - timedelta(days=3)
+    deadline = combination.close_date - timedelta(days=days_before_close)
     days_left = (deadline - (as_of or date.today())).days
 
     st.markdown("##### Plan de sortie")
@@ -62,7 +63,7 @@ def _render_exit_plan(
         delta=f"{max_loss_pct:.1f}% capital",
         delta_color="off",
     )
-    col3.metric("Date butoir (J-3 short)", deadline.strftime("%d %b %Y"))
+    col3.metric(f"Date butoir (J-{days_before_close} short)", deadline.strftime("%d %b %Y"))
 
     if days_left < 0:
         days_label = "dépassée"
@@ -117,6 +118,7 @@ def render_combo_detail(
     spot_range: np.ndarray | None = None,
     current_spot: float | None = None,
     as_of: date | None = None,
+    days_before_close: int = 3,
 ) -> None:
     """Affiche les détails d'une combinaison : legs, coûts, métriques."""
     st.subheader("Détails de la combinaison")
@@ -137,7 +139,8 @@ def render_combo_detail(
         st.info(ex_div_warning)
 
     if pnl_tensor is not None and spot_range is not None and current_spot is not None:
-        _render_exit_plan(combination, metrics, pnl_tensor, spot_range, current_spot, as_of=as_of)
+        _render_exit_plan(combination, metrics, pnl_tensor, spot_range, current_spot,
+                          as_of=as_of, days_before_close=days_before_close)
 
     rows = []
     for i, leg in enumerate(combination.legs, 1):

@@ -1,6 +1,7 @@
 """Calcul P&L batch sur GPU/CPU pour toutes les combinaisons simultanément."""
 
 import numpy as np
+from datetime import timedelta
 
 import config
 from engine.backend import xp, to_xp
@@ -17,9 +18,13 @@ def compute_batch_size(num_spots: int, num_vol_scenarios: int, num_legs: int = 4
     return int(config.MAX_GPU_MEMORY_BYTES / bytes_per_combo)
 
 
-def combinations_to_tensor(combinations: list) -> dict:
+def combinations_to_tensor(combinations: list, days_before_close: int = 0) -> dict:
     """
     Convertit une liste de Combination en dict de tenseurs xp prêts pour le GPU.
+
+    days_before_close : nombre de jours avant l'expiration des shorts utilisé comme
+    horizon de pricing. 0 = à l'expiration exacte (comportement historique),
+    3 = J-3 (valeur recommandée pour des cibles réalistes).
 
     Retourne un dict avec les clés :
       option_types, directions, quantities, strikes,
@@ -46,7 +51,8 @@ def combinations_to_tensor(combinations: list) -> dict:
             strikes[i, j] = leg.strike
             entry_prices[i, j] = leg.entry_price
             implied_vols[i, j] = leg.implied_vol
-            tte_days = max(0, (leg.expiration - combo.close_date).days)
+            exit_date = combo.close_date - timedelta(days=days_before_close)
+            tte_days = max(0, (leg.expiration - exit_date).days)
             tte_at_close[i, j] = tte_days / 365.0
             div_yields[i, j] = leg.div_yield
 

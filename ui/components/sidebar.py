@@ -228,6 +228,15 @@ def render_sidebar() -> dict:
             step=10_000,
             help="Réduire pour accélérer en mode CPU. GPU peut gérer 500K."
         )
+        days_before_close = st.slider(
+            "Profil P&L à J-N (avant expiration short)",
+            min_value=0, max_value=10, value=3, step=1,
+            help=(
+                "Horizon de pricing du profil P&L : N jours avant l'expiration "
+                "des jambes courtes. 0 = à l'expiration exacte (théorique max), "
+                "3 = J-3 (cible réaliste recommandée, évite le gamma risk)."
+            ),
+        )
 
         st.markdown("**Échéance des legs (DTE)**")
         near_expiry_range = st.slider(
@@ -304,6 +313,7 @@ def render_sidebar() -> dict:
         "vol_high": vol_high,
         "risk_free_rate": risk_free_rate,
         "max_combinations": int(max_combinations),
+        "days_before_close": int(days_before_close),
         "use_american_pricer": use_american_pricer,
         "near_expiry_range": tuple(near_expiry_range),
         "far_expiry_range": tuple(far_expiry_range),
