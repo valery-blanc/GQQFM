@@ -247,9 +247,13 @@ def _plot_replay(points, combo, as_of: date) -> go.Figure:
     fig.update_layout(
         title=f"Backtest replay (journalier) — entrée {as_of.strftime('%d %b %Y')}",
         template="plotly_dark",
-        xaxis=dict(title="Date"),
-        yaxis=dict(title="P&L (% net debit)", ticksuffix="%"),
-        yaxis2=dict(title="Spot ($)", overlaying="y", side="right", showgrid=False),
+        xaxis=dict(
+            title="Date",
+            rangebreaks=[dict(bounds=["sat", "mon"])],
+        ),
+        yaxis=dict(title="P&L (% net debit)", ticksuffix="%", tickformat=".2f"),
+        yaxis2=dict(title="Spot ($)", overlaying="y", side="right",
+                    showgrid=False, tickformat=",.2f"),
         hovermode="x unified",
         height=600,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
@@ -327,9 +331,14 @@ def _plot_replay_hourly(points, combo, as_of) -> go.Figure:
             title="Date / Heure (ET)",
             rangeslider=dict(visible=True, thickness=0.06),
             range=[x_start, x_end] if x_start else None,
+            rangebreaks=[
+                dict(bounds=["sat", "mon"]),           # masque weekends
+                dict(bounds=[16, 9], pattern="hour"),  # masque 16h-9h
+            ],
         ),
-        yaxis=dict(title="P&L (% net debit)", ticksuffix="%"),
-        yaxis2=dict(title="Spot ($)", overlaying="y", side="right", showgrid=False),
+        yaxis=dict(title="P&L (% net debit)", ticksuffix="%", tickformat=".2f"),
+        yaxis2=dict(title="Spot ($)", overlaying="y", side="right",
+                    showgrid=False, tickformat=",.2f"),
         hovermode="x unified",
         height=650,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
@@ -375,6 +384,7 @@ def render_backtest_page(params: dict) -> None:
             st.session_state.bt_results = result
             st.session_state.bt_replay = None
             st.session_state.bt_selected_idx = 0
+            st.session_state.pop("bt_days_forward", None)  # force recalcul défaut
         except Exception as exc:
             st.error(f"Erreur scan : {exc}")
             st.session_state.bt_results = None
@@ -428,6 +438,7 @@ def render_backtest_page(params: dict) -> None:
     if selected is not None and selected != idx:
         st.session_state.bt_selected_idx = selected
         st.session_state.bt_replay = None
+        st.session_state.pop("bt_days_forward", None)  # recalcule le défaut pour ce combo
         st.rerun()
 
     st.markdown("---")
