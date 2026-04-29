@@ -57,7 +57,8 @@ def _occ_symbol(symbol: str, expiration: date, option_type: str, strike: float) 
 
 
 def _build_combination(legs: list[Leg]) -> Combination:
-    close_date = min(l.expiration for l in legs)
+    short_exps = [l.expiration for l in legs if l.direction < 0]
+    close_date = min(short_exps) if short_exps else min(l.expiration for l in legs)
     net_debit  = sum(l.direction * l.quantity * l.entry_price * 100 for l in legs)
     return Combination(
         legs=legs, net_debit=net_debit, close_date=close_date, template_name="manual",

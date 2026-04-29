@@ -111,7 +111,8 @@ def _combo_to_combination(combo: dict):
         )
         for l in combo["legs"]
     ]
-    close_date = min(l.expiration for l in legs)
+    short_exps = [l.expiration for l in legs if l.direction < 0]
+    close_date = min(short_exps) if short_exps else min(l.expiration for l in legs)
     return Combination(
         legs=legs,
         net_debit=combo.get("net_debit", 0),
