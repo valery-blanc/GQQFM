@@ -150,27 +150,38 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
     ))
 
     import math
-    T = max(days_to_close, 1) / 365.0
-    realistic_range_pct = atm_vol * math.sqrt(T) * 100
     spot_range_cpu = to_cpu(spot_range)
-    lo = spot * (1 - realistic_range_pct / 100)
-    hi = spot * (1 + realistic_range_pct / 100)
-    real_mask = (spot_range_cpu >= lo) & (spot_range_cpu <= hi)
 
     metrics = []
     for i in range(len(filtered_combos)):
-        max_loss = pnl_mid_cpu[i].min()
-        max_gain = pnl_mid_cpu[i].max()
-        real_pnl = pnl_mid_cpu[i][real_mask]
-        max_gain_real = float(real_pnl.max()) if real_mask.any() else max_gain
-        nd = safe_debits[i] if safe_debits[i] != 0 else 1e-6
+        combo_i = filtered_combos[i]
+        max_loss = float(pnl_mid_cpu[i].min())
+        max_gain = float(pnl_mid_cpu[i].max())
+
+        # ±1σ per-combo
+        atm_vol_i = min((abs(l.strike - spot), l.implied_vol) for l in combo_i.legs)[1]
+        days_i    = max(1, (combo_i.close_date - as_of).days)
+        range_i   = atm_vol_i * math.sqrt(days_i / 365.0) * 100
+        lo_i      = spot * (1 - range_i / 100)
+        hi_i      = spot * (1 + range_i / 100)
+        mask_i    = (spot_range_cpu >= lo_i) & (spot_range_cpu <= hi_i)
+        real_pnl  = pnl_mid_cpu[i][mask_i]
+        max_gain_real = float(real_pnl.max()) if mask_i.any() else max_gain
+
+        nd_raw = float(safe_debits[i])
+        nd = abs(nd_raw) if abs(nd_raw) > 1.0 else 1e-6
+
         metrics.append({
-            "max_loss_pct": max_loss / nd * 100,
-            "loss_prob_pct": loss_probs[i] * 100,
-            "max_gain_pct": max_gain / nd * 100,
-            "max_gain_real_pct": max_gain_real / nd * 100,
-            "gain_loss_ratio": max_gain_real / abs(max_loss) if max_loss != 0 else 0,
-            "score": float(scores_cpu[i]),
+            "max_loss_pct":         max_loss      / nd * 100,
+            "loss_prob_pct":        loss_probs[i] * 100,
+            "max_gain_pct":         max_gain      / nd * 100,
+            "max_gain_real_pct":    max_gain_real / nd * 100,
+            "gain_loss_ratio":      max_gain_real / abs(max_loss) if max_loss != 0 else 0,
+            "score":                float(scores_cpu[i]),
+            "realistic_range_pct":  range_i,
+            "max_gain_real_dollar": max_gain_real,
+            "days_to_close":        days_i,
+            "daily_gain_dollar":    max_gain_real / days_i,
         })
 
     order = sorted(range(len(filtered_combos)), key=lambda i: -metrics[i]["score"])

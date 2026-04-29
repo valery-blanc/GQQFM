@@ -169,14 +169,14 @@ def build_single_combo_results(
     spot_range_cpu  = to_cpu(spot_range)
     pnl_mid         = pnl_for_combo[config.VOL_MEDIAN_INDEX]
 
-    # Utiliser abs(net_debit) comme dénominateur pour éviter les inversions de signe
-    # sur les combos à crédit ou near-zero. Alerter si trop petit pour être fiable.
     raw_nd = combination.net_debit
-    nd = abs(raw_nd) if abs(raw_nd) > 1.0 else None  # None = pas de % fiable
+    nd = abs(raw_nd) if abs(raw_nd) > 1.0 else None  # None = % non fiable
 
-    T  = max((combination.close_date - (as_of or date.today())).days, 1) / 365.0
-    atm_vol = max((l.implied_vol for l in combination.legs), default=0.20)
-    realistic_range_pct = atm_vol * math.sqrt(T) * 100
+    today = as_of or date.today()
+    days_i = max(1, (combination.close_date - today).days)
+    # ATM vol : IV du leg le plus proche du spot (même calcul que le scan)
+    atm_vol = min((abs(l.strike - spot), l.implied_vol) for l in combination.legs)[1]
+    realistic_range_pct = atm_vol * math.sqrt(days_i / 365.0) * 100
     lo, hi = spot * (1 - realistic_range_pct / 100), spot * (1 + realistic_range_pct / 100)
     real_mask = (spot_range_cpu >= lo) & (spot_range_cpu <= hi)
 
@@ -184,31 +184,25 @@ def build_single_combo_results(
     max_gain      = float(pnl_mid.max())
     max_gain_real = float(pnl_mid[real_mask].max()) if real_mask.any() else max_gain
 
-    if nd:
-        metric = {
-            "max_loss_pct":      max_loss      / nd * 100,
-            "loss_prob_pct":     0.0,
-            "max_gain_pct":      max_gain      / nd * 100,
-            "max_gain_real_pct": max_gain_real / nd * 100,
-            "gain_loss_ratio":   max_gain_real / abs(max_loss) if max_loss != 0 else 0.0,
-            "score":             0.0,
-        }
-    else:
-        # Métriques % non-fiables → fallback dollar
+    if not nd:
         st.info(
             f"Net debit = **{raw_nd:+.2f}$** (proche de zéro ou crédit). "
-            "Les métriques en % ne sont pas fiables pour ce combo — "
-            "affichage en dollars."
+            "Les métriques en % ne sont pas fiables — affichage en dollars."
         )
-        metric = {
-            "max_loss_pct":      max_loss,       # dollar ici, label sera adapté
-            "loss_prob_pct":     0.0,
-            "max_gain_pct":      max_gain,
-            "max_gain_real_pct": max_gain_real,
-            "gain_loss_ratio":   max_gain_real / abs(max_loss) if max_loss != 0 else 0.0,
-            "score":             0.0,
-            "_dollar_mode":      True,            # flag pour l'affichage
-        }
+        nd = 1.0  # fallback : % = $ (net_debit = 1$)
+
+    metric = {
+        "max_loss_pct":         max_loss      / nd * 100,
+        "loss_prob_pct":        0.0,
+        "max_gain_pct":         max_gain      / nd * 100,
+        "max_gain_real_pct":    max_gain_real / nd * 100,
+        "gain_loss_ratio":      max_gain_real / abs(max_loss) if max_loss != 0 else 0.0,
+        "score":                0.0,
+        "realistic_range_pct":  realistic_range_pct,
+        "max_gain_real_dollar": max_gain_real,
+        "days_to_close":        days_i,
+        "daily_gain_dollar":    max_gain_real / days_i,
+    }
 
     result = {
         "combinations":       [combination],
