@@ -157,6 +157,27 @@ doit être suivie de :
 `ui/app.py` (run_scan), `ui/page_backtest.py` (run_backtest_scan),
 `ui/combo_parser.py`, `ui/page_tracker.py` (_combo_to_combination)
 
+**Tracker (prix réels) — calcul P&L différent du scan :**
+Le P&L du tracker est arithmétique pur : `Σ direction × qty × (day.close − entry_price) × 100`.
+Pas de Black-Scholes. Pas de test unitaire scan↔tracker nécessaire.
+Surveiller uniquement : `day.close` non nul (déjà géré par `_warn_missing` dans collector).
+Fichier : `tracker/api.py` (endpoint `/pnl/{combo_id}`).
+
+### Sources de données par mode
+
+| Donnée | Live (yfinance) | Backtest (Polygon) | Tracker (Polygon) |
+|---|---|---|---|
+| Chaîne d'options | yfinance | Polygon historique | — |
+| Spot sous-jacent | yfinance | Polygon | yfinance `fast_info` |
+| Prix option courant | — | — | Polygon `day.close` |
+| Taux sans risque | yfinance (^IRX) | yfinance historique | — |
+| Dividend yield | yfinance (normalisé ÷100 si >1) | 0.0 (non dispo free) | — |
+
+Le mode **Live utilise uniquement yfinance**. Polygon n'est pas utilisé en Live.
+Pas de raison de changer : les deux sources ont 15 min de délai free tier, et
+yfinance couvre mieux les chaînes complètes pour un ticker donné.
+**Ne pas mixer les deux providers dans un même scan** — incohérences garanties.
+
 - Le commit regroupe TOUJOURS : code source + fichiers de doc + TASKS.md
 - Si l'utilisateur signale un problème après test → corriger, relancer,
   re-demander confirmation AVANT de committer
