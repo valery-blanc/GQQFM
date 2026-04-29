@@ -173,19 +173,24 @@ def _render_tracker_button(
     symbol: str | None,
     as_of: date | None,
 ) -> None:
-    """Ajoute le combo à tracked_combos.json + git push."""
-    import hashlib, json, subprocess
-    from pathlib import Path
+    """Envoie le combo à l'API Avignon via POST /combos."""
+    import hashlib
+    import requests as _req
 
-    COMBOS_PATH = Path(__file__).parent.parent.parent / "data" / "tracked_combos.json"
+    TRACKER_API = "http://192.168.0.222:8502"
+
     combo_id = hashlib.md5(
         "".join(l.contract_symbol for l in combination.legs).encode()
     ).hexdigest()[:12]
 
-    # Vérifier si déjà tracké
-    existing = json.loads(COMBOS_PATH.read_text()).get("combos", []) \
-        if COMBOS_PATH.exists() else []
-    already = any(c["id"] == combo_id for c in existing)
+    # Vérifier si déjà tracké côté Avignon
+    already = False
+    try:
+        resp = _req.get(f"{TRACKER_API}/combos", timeout=3)
+        if resp.status_code == 200:
+            already = any(c["id"] == combo_id for c in resp.json())
+    except Exception:
+        pass
 
     label = "✓ Déjà tracké" if already else "Tracker ce combo (prix réels)"
     if st.button(label, disabled=already, key=f"track_{combo_id}"):
@@ -209,26 +214,22 @@ def _render_tracker_button(
                 for l in combination.legs
             ],
         }
-        existing.append(entry)
-        COMBOS_PATH.write_text(json.dumps({"combos": existing}, indent=2, default=str))
-
-        # Auto-commit + push
-        repo = str(COMBOS_PATH.parent.parent)
         try:
-            subprocess.run(["git", "-C", repo, "add", str(COMBOS_PATH)],
-                           check=True, capture_output=True)
-            subprocess.run(["git", "-C", repo, "commit", "-m",
-                            f"tracker: add {entry['symbol']} {combo_id}"],
-                           check=True, capture_output=True)
-            subprocess.run(["git", "-C", repo, "push", "origin", "master"],
-                           check=True, capture_output=True)
-            st.success(
-                f"Combo ajouté au tracker (id: `{combo_id}`). "
-                "Le container Avignon récupèrera la MAJ dans ≤5 min."
-            )
-        except subprocess.CalledProcessError as e:
-            st.warning(
-                f"Sauvegardé localement mais git push a échoué : "
-                f"{e.stderr.decode()[:150]}. Lance `git push` manuellement."
+            resp = _req.post(f"{TRACKER_API}/combos", json=entry, timeout=5)
+            if resp.status_code == 200:
+                status = resp.json().get("status", "")
+                if status == "already_exists":
+                    st.info(f"Combo déjà tracké sur Avignon (id: `{combo_id}`).")
+                else:
+                    st.success(
+                        f"Combo envoyé à Avignon — tracking actif (id: `{combo_id}`). "
+                        "Première collecte à la prochaine fenêtre de 30 min."
+                    )
+            else:
+                st.error(f"Erreur API Avignon ({resp.status_code}) : {resp.text[:150]}")
+        except Exception as exc:
+            st.error(
+                f"Avignon non joignable (192.168.0.222:8502) : {exc}\n"
+                "Vérifie que le container gqqfm-tracker est démarré."
             )
         st.rerun()

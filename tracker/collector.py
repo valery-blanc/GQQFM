@@ -17,15 +17,14 @@ logger = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 POLYGON_BASE = "https://api.polygon.io"
 
-DATA_DIR  = Path(os.environ.get("DATA_DIR", "/data"))
-DB_PATH   = DATA_DIR / "tracker.db"
-REPO_DIR  = Path(os.environ.get("REPO_DIR", "/repo"))
-COMBOS_PATH = REPO_DIR / "data" / "tracked_combos.json"
-API_KEY   = os.environ.get("POLYGON_API_KEY", "")
+DATA_DIR    = Path(os.environ.get("DATA_DIR", "/data"))
+DB_PATH     = DATA_DIR / "tracker.db"
+COMBOS_PATH = DATA_DIR / "tracked_combos.json"
+API_KEY     = os.environ.get("POLYGON_API_KEY", "")
 
 
 def init_db() -> None:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS prices (
@@ -43,6 +42,13 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_combo_ts ON prices(combo_id, timestamp)"
         )
+
+
+def init_combos_file() -> None:
+    """Crée tracked_combos.json vide si absent (première exécution)."""
+    if not COMBOS_PATH.exists():
+        COMBOS_PATH.write_text(json.dumps({"combos": []}, indent=2))
+        logger.info("tracked_combos.json initialisé dans %s", DATA_DIR)
 
 
 def is_market_open() -> bool:
@@ -110,14 +116,3 @@ def collect_once() -> None:
                 rows,
             )
         logger.info("Collecté %d mesures @ %s", len(rows), timestamp)
-
-
-def pull_repo() -> None:
-    """git pull pour récupérer les mises à jour de tracked_combos.json."""
-    try:
-        import git
-        repo = git.Repo(REPO_DIR)
-        repo.remotes.origin.pull()
-        logger.info("git pull OK")
-    except Exception as exc:
-        logger.warning("git pull failed: %s", exc)

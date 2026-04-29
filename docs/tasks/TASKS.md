@@ -315,15 +315,41 @@
 - [x] docs/bugs/BUG-010-014-replay-fixes.md
 - [x] validation utilisateur sur ANQA — OK (2026-04-28)
 
+## FEAT-017 — Gain max réaliste ±1σ + ratio market/theoretical replay
+
+- [x] scoring/filters.py — realistic_max_gain() : max P&L dans ±iv×√(T/365)
+- [x] scoring/scorer.py — gain_loss_ratio basé sur gain réaliste
+- [x] ui/app.py + ui/page_backtest.py — max_gain_real_pct + realistic_range_pct
+- [x] ui/components/results_table.py — colonne "Gain ±1σ %"
+- [x] ui/components/combo_detail.py — bannière "Gain ±1σ"
+- [x] ui/page_backtest.py — caption ratio market/theoretical après replay
+- [x] docs/specs/FEAT-017-gain-realiste.md
+
+## FEAT-018 — Résolution intraday configurable (1h / 15min / 5min)
+
+- [x] backtesting/replay.py — _prefetch_intraday_range(multiplier, timespan) + filtre NYSE 9h30-16h
+- [x] backtesting/replay.py — RESOLUTIONS + backtest_combo_hourly(resolution=) généralisé
+- [x] ui/page_backtest.py — sélecteur résolution + rangebreaks adaptés + fix layout
+- [x] docs/specs/FEAT-018-resolution-intraday.md
+
 ## FEAT-019 — Tracker de prix réels (Avignon Docker)
 
-- [ ] data/tracked_combos.json — fichier de config versionné (liste des combos trackés)
-- [ ] tracker/collector.py — collecte Polygon snapshot toutes les 30min (bid/ask/mid/spot/iv)
-- [ ] tracker/api.py — FastAPI REST : /health /combos /prices/{id} /pnl/{id}
-- [ ] tracker/main.py — scheduler APScheduler + git pull 5min + uvicorn
-- [ ] tracker/Dockerfile + requirements.txt + docker-compose.yml
-- [ ] .gitignore — exclure tracker/data/tracker.db
-- [ ] ui/page_tracker.py — liste combos + suppression + graphe comparaison replay vs réel
-- [ ] ui/components/combo_detail.py — bouton "Tracker ce combo"
-- [ ] ui/app.py — routing page tracker dans sidebar
-- [ ] Déploiement sur Avignon (~/docker/gqqfm-tracker/)
+- [x] tracker/collector.py — collecte Polygon snapshot toutes les 30min (bid/ask/mid/spot/iv)
+- [x] tracker/api.py — FastAPI REST : /health /combos /prices/{id} /pnl/{id}
+- [x] tracker/main.py — scheduler APScheduler + uvicorn
+- [x] tracker/Dockerfile + requirements.txt + docker-compose.yml (bind mount disque hôte)
+- [x] ui/page_tracker.py — liste combos + suppression + graphe comparaison replay vs réel
+- [x] ui/components/combo_detail.py — bouton "Tracker ce combo"
+- [x] ui/app.py — routing page tracker dans sidebar
+- [x] docs/specs/FEAT-019-tracker-prix-reels.md
+
+## BUG-020 — Tracker sync git push cassé → 0 combos sur Avignon
+
+- [x] tracker/api.py — POST /combos + DELETE /combos/{id} + COMBOS_PATH → DATA_DIR
+- [x] tracker/collector.py — COMBOS_PATH → DATA_DIR + init_combos_file()
+- [x] tracker/main.py — suppression pull_repo + appel init_combos_file()
+- [x] tracker/docker-compose.yml — bind mount ~/tracker-data:/data (survie crash Docker)
+- [x] ui/components/combo_detail.py — POST /combos au lieu de git push
+- [x] ui/page_tracker.py — GET /combos + DELETE /combos/{id} au lieu de fichier local
+- [x] docs/bugs/BUG-020-tracker-sync-git-push.md
+- [ ] Déploiement : rebuild Docker sur Avignon + mkdir ~/tracker-data

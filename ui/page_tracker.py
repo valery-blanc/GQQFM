@@ -2,50 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
-from datetime import datetime
-from pathlib import Path
-
-import numpy as np
 import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-COMBOS_PATH = Path(__file__).parent.parent / "data" / "tracked_combos.json"
 TRACKER_API = "http://192.168.0.222:8502"
-
-
-def _load_combos() -> list[dict]:
-    if not COMBOS_PATH.exists():
-        return []
-    return json.loads(COMBOS_PATH.read_text()).get("combos", [])
-
-
-def _save_combos(combos: list[dict]) -> None:
-    COMBOS_PATH.write_text(json.dumps({"combos": combos}, indent=2, default=str))
-    # Auto-commit + push pour que le container Avignon récupère la MAJ
-    try:
-        subprocess.run(
-            ["git", "-C", str(COMBOS_PATH.parent.parent),
-             "add", str(COMBOS_PATH)], check=True, capture_output=True
-        )
-        subprocess.run(
-            ["git", "-C", str(COMBOS_PATH.parent.parent),
-             "commit", "-m", "tracker: mise à jour tracked_combos.json"],
-            check=True, capture_output=True
-        )
-        subprocess.run(
-            ["git", "-C", str(COMBOS_PATH.parent.parent),
-             "push", "origin", "master"],
-            check=True, capture_output=True
-        )
-        st.success("tracked_combos.json mis à jour et pushé sur GitHub.")
-    except subprocess.CalledProcessError as e:
-        st.warning(
-            f"Fichier mis à jour localement mais git push a échoué : {e.stderr.decode()[:200]}\n"
-            "Lance `git push` manuellement pour activer le tracking sur Avignon."
-        )
 
 
 def _api_get(path: str, timeout: int = 5):
@@ -55,6 +16,14 @@ def _api_get(path: str, timeout: int = 5):
         return resp.json()
     except Exception:
         return None
+
+
+def _api_delete(path: str, timeout: int = 5) -> bool:
+    try:
+        resp = requests.delete(f"{TRACKER_API}{path}", timeout=timeout)
+        return resp.status_code == 200
+    except Exception:
+        return False
 
 
 def _plot_comparison(pnl_data: list[dict], combo: dict) -> go.Figure:
@@ -112,17 +81,16 @@ def render_tracker_page() -> None:
             f"{health['total_price_rows']} mesures en base."
         )
     else:
-        st.warning(
+        st.error(
             "Container Avignon non joignable (192.168.0.222:8502). "
-            "Les combos sont sauvegardés localement mais le tracking n'est pas actif."
+            "Lance `docker-compose up -d` sur Avignon pour démarrer le tracker."
         )
+        return
 
     st.markdown("---")
 
-    # ── Liste des combos trackés ────────────────────────────────────────────
-    combos = _load_combos()
-    api_combos = _api_get("/combos") or []
-    api_by_id  = {c["id"]: c for c in api_combos}
+    # ── Liste des combos trackés (depuis l'API) ─────────────────────────────
+    combos = _api_get("/combos") or []
 
     if not combos:
         st.info(
@@ -133,10 +101,9 @@ def render_tracker_page() -> None:
 
     st.subheader(f"{len(combos)} combo(s) trackés")
 
-    for i, combo in enumerate(combos):
-        api_info = api_by_id.get(combo["id"], {})
-        n_snap   = api_info.get("n_snapshots", "?")
-        since    = combo.get("tracked_since", "?")[:16].replace("T", " ")
+    for combo in combos:
+        n_snap = combo.get("n_snapshots", "?")
+        since  = combo.get("tracked_since", "?")[:16].replace("T", " ")
 
         with st.expander(
             f"**{combo['symbol']}** — scanné le {combo.get('as_of', '?')} "
@@ -163,15 +130,14 @@ def render_tracker_page() -> None:
 
             c1, c2 = st.columns(2)
 
-            # Afficher les données collectées
             if c1.button("Afficher les données réelles", key=f"show_{combo['id']}"):
                 pnl_data = _api_get(f"/pnl/{combo['id']}", timeout=10)
                 if pnl_data:
                     fig = _plot_comparison(pnl_data, combo)
                     st.plotly_chart(fig, use_container_width=True)
 
-                    final = pnl_data[-1]
-                    peak  = max(pnl_data, key=lambda d: d["pnl_dollar"])
+                    final  = pnl_data[-1]
+                    peak   = max(pnl_data, key=lambda d: d["pnl_dollar"])
                     trough = min(pnl_data, key=lambda d: d["pnl_dollar"])
                     mc1, mc2, mc3 = st.columns(3)
                     mc1.metric("P&L final (mid)",  f"${final['pnl_dollar']:+,.2f}",
@@ -189,9 +155,10 @@ def render_tracker_page() -> None:
                 else:
                     st.info("Pas encore de données collectées pour ce combo.")
 
-            # Supprimer le combo
             if c2.button("Supprimer du tracker", key=f"del_{combo['id']}",
                          type="secondary"):
-                updated = [c for c in combos if c["id"] != combo["id"]]
-                _save_combos(updated)
-                st.rerun()
+                if _api_delete(f"/combos/{combo['id']}"):
+                    st.success("Combo supprimé du tracker Avignon.")
+                    st.rerun()
+                else:
+                    st.error("Impossible de supprimer — Avignon non joignable.")

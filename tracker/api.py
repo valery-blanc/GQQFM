@@ -6,8 +6,8 @@ import json
 import os
 import sqlite3
 from collections import defaultdict
-from datetime import datetime
 from pathlib import Path
+from threading import Lock
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,18 +17,23 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 DATA_DIR    = Path(os.environ.get("DATA_DIR", "/data"))
 DB_PATH     = DATA_DIR / "tracker.db"
-REPO_DIR    = Path(os.environ.get("REPO_DIR", "/repo"))
-COMBOS_PATH = REPO_DIR / "data" / "tracked_combos.json"
+COMBOS_PATH = DATA_DIR / "tracked_combos.json"
+
+_combos_lock = Lock()
 
 
-def _combos() -> list[dict]:
+def _read_combos() -> list[dict]:
     if not COMBOS_PATH.exists():
         return []
     return json.loads(COMBOS_PATH.read_text()).get("combos", [])
 
 
+def _write_combos(combos: list[dict]) -> None:
+    COMBOS_PATH.write_text(json.dumps({"combos": combos}, indent=2, default=str))
+
+
 def _find_combo(combo_id: str) -> dict | None:
-    return next((c for c in _combos() if c["id"] == combo_id), None)
+    return next((c for c in _read_combos() if c["id"] == combo_id), None)
 
 
 def _db_rows(combo_id: str) -> list[tuple]:
@@ -44,7 +49,7 @@ def _db_rows(combo_id: str) -> list[tuple]:
 
 @app.get("/health")
 def health():
-    n_combos = len(_combos())
+    n_combos = len(_read_combos())
     n_rows = 0
     if DB_PATH.exists():
         with sqlite3.connect(DB_PATH) as conn:
@@ -54,8 +59,7 @@ def health():
 
 @app.get("/combos")
 def list_combos():
-    combos = _combos()
-    # Enrichit avec le nombre de mesures en base
+    combos = _read_combos()
     result = []
     for c in combos:
         n = 0
@@ -69,9 +73,35 @@ def list_combos():
     return result
 
 
+@app.post("/combos")
+def add_combo(combo: dict):
+    """Ajoute un combo à tracker. Idempotent si l'id existe déjà."""
+    combo_id = combo.get("id")
+    if not combo_id:
+        raise HTTPException(400, "Champ 'id' manquant")
+    with _combos_lock:
+        combos = _read_combos()
+        if any(c["id"] == combo_id for c in combos):
+            return {"status": "already_exists", "id": combo_id}
+        combos.append(combo)
+        _write_combos(combos)
+    return {"status": "added", "id": combo_id}
+
+
+@app.delete("/combos/{combo_id}")
+def remove_combo(combo_id: str):
+    """Supprime un combo du tracker (ne supprime pas les mesures historiques)."""
+    with _combos_lock:
+        combos = _read_combos()
+        updated = [c for c in combos if c["id"] != combo_id]
+        if len(updated) == len(combos):
+            raise HTTPException(404, "combo_id inconnu")
+        _write_combos(updated)
+    return {"status": "removed", "id": combo_id}
+
+
 @app.get("/prices/{combo_id}")
 def get_prices(combo_id: str):
-    """Toutes les mesures brutes d'un combo (une ligne par leg par timestamp)."""
     rows = _db_rows(combo_id)
     return [
         {"timestamp": r[0], "leg_symbol": r[1], "bid": r[2],
@@ -85,8 +115,6 @@ def get_pnl(combo_id: str):
     """
     Série temporelle du P&L réel calculé depuis les prix collectés.
     P&L = Σ direction × qty × (current_mid − entry_price) × 100
-    Retourne aussi pnl_real_bid_ask = P&L si on clôture au bid/ask réel
-    (plus réaliste : on vend au bid, on rachète à l'ask).
     """
     combo = _find_combo(combo_id)
     if combo is None:
@@ -96,11 +124,9 @@ def get_pnl(combo_id: str):
     if not rows:
         return []
 
-    # Indexer les legs par symbole
     leg_by_sym = {leg["contract_symbol"]: leg for leg in combo["legs"]}
     net_debit  = combo.get("net_debit") or 1e-6
 
-    # Grouper par timestamp
     by_ts: dict[str, dict[str, dict]] = defaultdict(dict)
     for ts, leg_sym, bid, ask, mid, spot, iv in rows:
         by_ts[ts][leg_sym] = {"bid": bid, "ask": ask, "mid": mid, "spot": spot, "iv": iv}
@@ -109,10 +135,10 @@ def get_pnl(combo_id: str):
     for ts in sorted(by_ts):
         leg_prices = by_ts[ts]
         if not all(sym in leg_prices for sym in leg_by_sym):
-            continue  # snapshot incomplet ce créneau
+            continue
 
         pnl_mid = 0.0
-        pnl_exec = 0.0  # prix d'exécution réaliste (bid si vente, ask si achat)
+        pnl_exec = 0.0
         spot = None
 
         for sym, leg in leg_by_sym.items():
@@ -126,17 +152,16 @@ def get_pnl(combo_id: str):
             d, q = leg["direction"], leg["quantity"]
 
             pnl_mid  += d * q * (mid - entry) * 100
-            # Exécution : si direction=+1 (long) on VEND → bid ; si -1 (short) on RACHÈTE → ask
             exec_price = bid if d > 0 else ask
             pnl_exec += d * q * (exec_price - entry) * 100
 
         result.append({
-            "timestamp":    ts,
-            "pnl_dollar":   round(pnl_mid,  2),
-            "pnl_pct":      round(pnl_mid  / abs(net_debit) * 100, 2),
+            "timestamp":       ts,
+            "pnl_dollar":      round(pnl_mid,  2),
+            "pnl_pct":         round(pnl_mid  / abs(net_debit) * 100, 2),
             "pnl_exec_dollar": round(pnl_exec, 2),
             "pnl_exec_pct":    round(pnl_exec / abs(net_debit) * 100, 2),
-            "spot":         spot,
+            "spot":            spot,
         })
 
     return result

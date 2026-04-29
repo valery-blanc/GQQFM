@@ -5,24 +5,10 @@ services:
     ports:
       - "8502:8502"
     volumes:
-      - tracker_data:/data
-      - gqqfm_repo:/repo
+      # Bind mount direct sur le disque d'Avignon — survie aux réinstallations Docker
+      - ${TRACKER_DATA_DIR:-/home/val/tracker-data}:/data
     environment:
       - POLYGON_API_KEY=${POLYGON_API_KEY}
-      - REPO_DIR=/repo
       - DATA_DIR=/data
       - PORT=8502
     restart: unless-stopped
-
-  # Clone initial du repo (one-shot, puis le main.py fait git pull)
-  gqqfm-clone:
-    image: alpine/git
-    volumes:
-      - gqqfm_repo:/repo
-    command: >
-      sh -c "[ -d /repo/.git ] || git clone https://github.com/valery-blanc/GQQFM /repo"
-    restart: "no"
-
-volumes:
-  tracker_data:
-  gqqfm_repo:

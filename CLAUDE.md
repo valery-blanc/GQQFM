@@ -120,6 +120,10 @@ Pour relancer Streamlit (tuer l'instance existante et redémarrer) :
 pkill -f "streamlit run" 2>/dev/null; C:/Users/Val/AppData/Local/Programs/Python/Python311/python.exe -m streamlit run ui/app.py
 ```
 
+**Règle importante — tests de scan :**
+- `http://localhost:8501` (machine locale, pas de GPU dédié) : trop lent pour les scans. Utilisable uniquement pour tester l'UI, la navigation, et les pages qui n'exigent pas de scan (Tracker, Backtest).
+- `http://192.168.0.133:8501` (ANQA, RTX 5070 Ti) : seule machine utilisable pour tester un scan complet. Pour déployer sur ANQA : `/vb-deployANQA`.
+
 - Le commit regroupe TOUJOURS : code source + fichiers de doc + TASKS.md
 - Si l'utilisateur signale un problème après test → corriger, relancer,
   re-demander confirmation AVANT de committer
@@ -161,6 +165,44 @@ pkill -f "streamlit run" 2>/dev/null; C:/Users/Val/AppData/Local/Programs/Python
 8. Une fois confirmé : committer TOUS les fichiers modifiés en un seul commit
    (code + docs + TASKS.md) : `"FEAT-XXX: description courte"`
 9. Mettre à jour CLAUDE.md si des règles d'architecture ont changé
+
+## Serveurs — accès SSH
+
+| Serveur | Rôle | IP | OS |
+|---|---|---|---|
+| **ANQA** | PC Windows (build Android, Streamlit GQQFM secondaire) | `192.168.0.133` | Windows 11 |
+| **Avignon** | Serveur Linux 24/7 (Docker : tracker GQQFM, sites web) | `192.168.0.222` | Debian |
+
+### ANQA (Windows)
+
+```bash
+ssh -i ~/.ssh/id_ed25519_claude Val@192.168.0.133
+# Exemple : lancer une commande PowerShell
+ssh -i ~/.ssh/id_ed25519_claude Val@192.168.0.133 'powershell -Command "..."'
+```
+
+- Clé : `~/.ssh/id_ed25519_claude` (sans passphrase)
+- User : `Val` (majuscule)
+- Shell natif : PowerShell — utiliser des guillemets simples bash autour de la commande SSH
+- Pas d'alias `~/.ssh/config` — toujours passer `-i ~/.ssh/id_ed25519_claude Val@192.168.0.133`
+- Déploiement GQQFM sur ANQA : voir skill `/vb-deployANQA`
+
+### Avignon (Linux/Docker)
+
+```bash
+ssh avignon           # alias dans ~/.ssh/config → val@192.168.0.222
+ssh avignon "commande"
+
+# Exemples courants
+ssh avignon "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+ssh avignon "cd ~/docker/gqqfm-tracker && docker compose logs --tail 20"
+ssh avignon "curl -s http://localhost:8502/health"
+```
+
+- Clé : `~/.ssh/claude_avignon` (configurée dans `~/.ssh/config` sous l'alias `avignon`)
+- User : `val` (minuscule)
+- Dossiers Docker : `~/docker/<service>/` (traefik, platform, gqqfm-tracker, …)
+- Données tracker GQQFM : `~/tracker-data/` (bind mount → `/data` dans le container)
 
 ## Création de skills personnalisés
 
