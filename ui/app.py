@@ -188,6 +188,7 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
             "max_gain_real_dollar": max_gain_real,
             "days_to_close":        days_i,
             "daily_gain_dollar":    max_gain_real / days_i,
+            "_atm_vol_pct":         f"{atm_vol_i*100:.1f}%",
         })
 
     # Tri par score décroissant
@@ -402,6 +403,22 @@ def main():
     combo = results["combinations"][idx]
     m = results["metrics"][idx]
     pnl_for_combo = results["pnl_per_combo"][idx]   # (V, M)
+
+    # Paramètres de calcul du Gain ±1σ — pour vérification vs saisie directe
+    with st.expander("🔍 Paramètres de calcul du Gain ±1σ (scan)", expanded=False):
+        st.caption(
+            f"**IV ATM utilisée :** {m.get('_atm_vol_pct', '?')}  |  "
+            f"**Jours J-3 :** {m.get('days_to_close', '?')}  |  "
+            f"**Fenêtre ±1σ :** {m.get('realistic_range_pct', 0):.1f}%  |  "
+            f"**Net debit :** {combo.net_debit:+.2f}$  |  "
+            f"**Spot scan :** {results['spots'][idx]:.2f}$"
+        )
+        import pandas as pd
+        leg_rows = [{"Leg": f"{'L' if l.direction>0 else 'S'}{l.quantity} {l.option_type} {l.strike:g} {l.expiration}",
+                     "Prix entrée (scan)": f"${l.entry_price:.2f}",
+                     "IV (scan)": f"{l.implied_vol*100:.1f}%"}
+                    for l in combo.legs]
+        st.dataframe(pd.DataFrame(leg_rows), use_container_width=True, hide_index=True)
 
     fig = plot_pnl_profile(
         combination=combo,
