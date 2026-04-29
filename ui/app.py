@@ -297,6 +297,10 @@ def main():
                     resolved = resolve_combo_live(leg_specs, symbol)
                 if resolved:
                     combination, spot = resolved
+                    st.caption(
+                        f"Net debit calculé : **{combination.net_debit:+.2f}$** "
+                        "(prix yfinance re-fetchés — peut différer légèrement du scan si combo scanné il y a quelques minutes)"
+                    )
                     st.session_state.results = build_single_combo_results(
                         combination, spot, symbol, params
                     )

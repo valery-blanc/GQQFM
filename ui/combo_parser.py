@@ -64,26 +64,42 @@ def _build_combination(legs: list[Leg]) -> Combination:
     )
 
 
-def _legs_from_specs(leg_specs: list[dict], contract_index: dict) -> list[Leg]:
-    """Construit les Leg depuis les specs parsées et un index (expiry,strike,type) → contract."""
-    legs = []
+def _legs_from_specs(
+    leg_specs: list[dict], contract_index: dict,
+) -> tuple[list[Leg], list[str]]:
+    """Construit les Leg depuis les specs parsées.
+    Retourne (legs, missing) où missing = symboles non trouvés dans la chaîne."""
+    legs, missing = [], []
     for spec in leg_specs:
         key      = (spec["expiration"], spec["strike"], spec["option_type"])
         contract = contract_index.get(key)
+        if contract is None or contract.mid == 0:
+            missing.append(
+                f"{spec['option_type']} {spec['strike']:g} {spec['expiration']}"
+            )
         legs.append(Leg(
             option_type    = spec["option_type"],
             direction      = spec["direction"],
             quantity       = spec["quantity"],
             strike         = spec["strike"],
             expiration     = spec["expiration"],
-            entry_price    = contract.mid if contract else 0.0,
+            entry_price    = contract.mid if (contract and contract.mid > 0) else 0.0,
             implied_vol    = (contract.implied_vol if contract and contract.implied_vol > 0
                               else 0.20),
             contract_symbol = _occ_symbol(
                 spec["symbol"], spec["expiration"], spec["option_type"], spec["strike"]
             ),
         ))
-    return legs
+    return legs, missing
+
+
+def _warn_missing(missing: list[str], source: str) -> None:
+    if missing:
+        st.warning(
+            f"**{len(missing)} leg(s) non trouvé(s) dans la chaîne {source}** "
+            f"(prix mis à 0 — métriques P&L incorrectes) :\n"
+            + "\n".join(f"- {m}" for m in missing)
+        )
 
 
 def resolve_combo_live(
@@ -94,7 +110,9 @@ def resolve_combo_live(
     try:
         chain = YFinanceProvider().get_options_chain(symbol)
         idx   = {(c.expiration, c.strike, c.option_type): c for c in chain.contracts}
-        return _build_combination(_legs_from_specs(leg_specs, idx)), chain.underlying_price
+        legs, missing = _legs_from_specs(leg_specs, idx)
+        _warn_missing(missing, "yfinance")
+        return _build_combination(legs), chain.underlying_price
     except Exception as exc:
         st.error(f"Erreur chargement yfinance ({symbol}) : {exc}")
         return None
@@ -103,18 +121,15 @@ def resolve_combo_live(
 def resolve_combo_backtest(
     leg_specs: list[dict], symbol: str, as_of: date, scan_time: str | None = None,
 ) -> tuple[Combination, float, object] | None:
-    """
-    Résout les prix depuis Polygon à la date as_of.
-    Retourne (Combination, spot, provider) ou None.
-    """
+    """Résout les prix depuis Polygon à la date as_of. Retourne (Combination, spot, provider) ou None."""
     from data.provider_polygon import PolygonHistoricalProvider
     try:
         provider = PolygonHistoricalProvider()
-        chain    = provider.get_options_chain(
-            symbol, as_of=as_of, scan_time=scan_time,
-        )
+        chain    = provider.get_options_chain(symbol, as_of=as_of, scan_time=scan_time)
         idx = {(c.expiration, c.strike, c.option_type): c for c in chain.contracts}
-        return _build_combination(_legs_from_specs(leg_specs, idx)), chain.underlying_price, provider
+        legs, missing = _legs_from_specs(leg_specs, idx)
+        _warn_missing(missing, f"Polygon @ {as_of}")
+        return _build_combination(legs), chain.underlying_price, provider
     except Exception as exc:
         st.error(f"Erreur chargement Polygon ({symbol} @ {as_of}) : {exc}")
         return None
@@ -154,25 +169,46 @@ def build_single_combo_results(
     spot_range_cpu  = to_cpu(spot_range)
     pnl_mid         = pnl_for_combo[config.VOL_MEDIAN_INDEX]
 
-    nd = combination.net_debit if combination.net_debit != 0 else 1e-6
+    # Utiliser abs(net_debit) comme dénominateur pour éviter les inversions de signe
+    # sur les combos à crédit ou near-zero. Alerter si trop petit pour être fiable.
+    raw_nd = combination.net_debit
+    nd = abs(raw_nd) if abs(raw_nd) > 1.0 else None  # None = pas de % fiable
+
     T  = max((combination.close_date - (as_of or date.today())).days, 1) / 365.0
     atm_vol = max((l.implied_vol for l in combination.legs), default=0.20)
     realistic_range_pct = atm_vol * math.sqrt(T) * 100
     lo, hi = spot * (1 - realistic_range_pct / 100), spot * (1 + realistic_range_pct / 100)
     real_mask = (spot_range_cpu >= lo) & (spot_range_cpu <= hi)
 
-    max_loss     = float(pnl_mid.min())
-    max_gain     = float(pnl_mid.max())
+    max_loss      = float(pnl_mid.min())
+    max_gain      = float(pnl_mid.max())
     max_gain_real = float(pnl_mid[real_mask].max()) if real_mask.any() else max_gain
 
-    metric = {
-        "max_loss_pct":      max_loss / nd * 100,
-        "loss_prob_pct":     0.0,
-        "max_gain_pct":      max_gain / nd * 100,
-        "max_gain_real_pct": max_gain_real / nd * 100,
-        "gain_loss_ratio":   max_gain_real / abs(max_loss) if max_loss != 0 else 0.0,
-        "score":             0.0,
-    }
+    if nd:
+        metric = {
+            "max_loss_pct":      max_loss      / nd * 100,
+            "loss_prob_pct":     0.0,
+            "max_gain_pct":      max_gain      / nd * 100,
+            "max_gain_real_pct": max_gain_real / nd * 100,
+            "gain_loss_ratio":   max_gain_real / abs(max_loss) if max_loss != 0 else 0.0,
+            "score":             0.0,
+        }
+    else:
+        # Métriques % non-fiables → fallback dollar
+        st.info(
+            f"Net debit = **{raw_nd:+.2f}$** (proche de zéro ou crédit). "
+            "Les métriques en % ne sont pas fiables pour ce combo — "
+            "affichage en dollars."
+        )
+        metric = {
+            "max_loss_pct":      max_loss,       # dollar ici, label sera adapté
+            "loss_prob_pct":     0.0,
+            "max_gain_pct":      max_gain,
+            "max_gain_real_pct": max_gain_real,
+            "gain_loss_ratio":   max_gain_real / abs(max_loss) if max_loss != 0 else 0.0,
+            "score":             0.0,
+            "_dollar_mode":      True,            # flag pour l'affichage
+        }
 
     result = {
         "combinations":       [combination],
