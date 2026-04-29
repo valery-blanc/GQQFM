@@ -86,6 +86,7 @@ def _legs_from_specs(
             entry_price    = contract.mid if (contract and contract.mid > 0) else 0.0,
             implied_vol    = (contract.implied_vol if contract and contract.implied_vol > 0
                               else 0.20),
+            div_yield      = contract.div_yield if contract else 0.0,
             contract_symbol = _occ_symbol(
                 spec["symbol"], spec["expiration"], spec["option_type"], spec["strike"]
             ),
@@ -225,7 +226,11 @@ def build_single_combo_results(
         "max_gain_real_dollar": max_gain_real,
         "days_to_close":        days_i,
         "daily_gain_dollar":    max_gain_real / days_i,
-        "_warnings":            warnings,   # affichés après rerun dans la page
+        "_atm_vol_pct":         f"{atm_vol*100:.2f}%",
+        "_nd_raw":              raw_nd,
+        "_nd_used":             nd,
+        "_max_loss_dollar":     max_loss,
+        "_warnings":            warnings,
     }
 
     result = {
