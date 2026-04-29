@@ -423,44 +423,26 @@ def render_backtest_page(params: dict) -> None:
                 st.error("Format invalide.")
             else:
                 symbol = leg_specs[0]["symbol"]
-                # Chercher d'abord dans les résultats du scan backtest en cours
-                from ui.app import _find_combo_in_results
-                existing = _find_combo_in_results(
-                    leg_specs, st.session_state.get("bt_results")
-                )
-                if existing is not None:
-                    combo_idx, scan_results = existing
-                    st.session_state.bt_results = scan_results
+                with st.spinner(f"Chargement prix Polygon ({symbol} @ {as_of}{time_label})…"):
+                    resolved = resolve_combo_backtest(leg_specs, symbol, as_of, scan_time)
+                if resolved:
+                    combination, spot, provider, missing, details = resolved
+                    result = build_single_combo_results(
+                        combination, spot, symbol, params, as_of=as_of, provider=provider
+                    )
+                    st.session_state.bt_results = result
                     st.session_state.bt_replay = None
-                    st.session_state.bt_selected_idx = combo_idx
-                    st.session_state["_combo_warnings"] = [
-                        "Combo trouvé dans les résultats du scan backtest — "
-                        "prix Polygon du scan utilisés directement."
-                    ]
-                    st.session_state["_combo_leg_details"] = []
-                    st.session_state["_combo_net_debit"] = None
-                    st.rerun()
-                else:
-                    with st.spinner(f"Chargement prix Polygon ({symbol} @ {as_of}{time_label})…"):
-                        resolved = resolve_combo_backtest(leg_specs, symbol, as_of, scan_time)
-                    if resolved:
-                        combination, spot, provider, missing, details = resolved
-                        result = build_single_combo_results(
-                            combination, spot, symbol, params, as_of=as_of, provider=provider
+                    st.session_state.bt_selected_idx = 0
+                    warnings = result["metrics"][0].get("_warnings", [])
+                    if missing:
+                        warnings.insert(0,
+                            f"⚠ {len(missing)} leg(s) non trouvé(s) dans la chaîne "
+                            f"Polygon @ {as_of} (prix=0, P&L faussé) : {', '.join(missing)}"
                         )
-                        st.session_state.bt_results = result
-                        st.session_state.bt_replay = None
-                        st.session_state.bt_selected_idx = 0
-                        warnings = result["metrics"][0].get("_warnings", [])
-                        if missing:
-                            warnings.insert(0,
-                                f"⚠ {len(missing)} leg(s) non trouvé(s) dans la chaîne "
-                                f"Polygon @ {as_of} (prix=0) : {', '.join(missing)}"
-                            )
-                        st.session_state["_combo_warnings"] = warnings
-                        st.session_state["_combo_leg_details"] = details
-                        st.session_state["_combo_net_debit"] = combination.net_debit
-                        st.rerun()
+                    st.session_state["_combo_warnings"] = warnings
+                    st.session_state["_combo_leg_details"] = details
+                    st.session_state["_combo_net_debit"] = combination.net_debit
+                    st.rerun()
 
     # ── Bouton Lancer le scan (FEAT-020) ────────────────────────────────────
     scan_clicked = st.button("🔍 Lancer le scan", type="primary", key="bt_scan_btn")

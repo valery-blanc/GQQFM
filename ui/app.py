@@ -329,43 +329,23 @@ def main():
                 st.error("Format invalide. Exemple : L1 call SPY 17JUL2026 715 | S1 put SPY 15MAY2026 672")
             else:
                 symbol = leg_specs[0]["symbol"]
-                # Chercher d'abord dans les résultats du scan en cours
-                existing = _find_combo_in_results(
-                    leg_specs, st.session_state.get("results")
-                )
-                if existing is not None:
-                    combo_idx, scan_results = existing
-                    st.session_state.results = scan_results
-                    st.session_state.selected_combo_idx = combo_idx
-                    st.session_state["_combo_warnings"] = [
-                        "Combo trouvé dans les résultats du scan en cours — "
-                        "prix du scan utilisés directement (pas de re-fetch)."
-                    ]
-                    st.session_state["_combo_leg_details"] = []
-                    st.session_state["_combo_net_debit"] = None
-                    st.rerun()
-                else:
-                    with st.spinner(f"Chargement des prix {symbol} (yfinance)…"):
-                        resolved = resolve_combo_live(leg_specs, symbol)
-                    if resolved:
-                        combination, spot, missing, details = resolved
-                        result = build_single_combo_results(combination, spot, symbol, params)
-                        st.session_state.results = result
-                        st.session_state.selected_combo_idx = 0
-                        warnings = result["metrics"][0].get("_warnings", [])
-                        if missing:
-                            warnings.insert(0,
-                                f"⚠ {len(missing)} leg(s) non trouvé(s) dans la chaîne "
-                                f"yfinance (prix=0, P&L incorrect) : {', '.join(missing)}"
-                            )
-                        warnings.append(
-                            "Combo non présent dans le scan courant — prix re-fetchés "
-                            "depuis yfinance. Relancer le scan pour des prix cohérents."
+                with st.spinner(f"Chargement des prix {symbol} (yfinance)…"):
+                    resolved = resolve_combo_live(leg_specs, symbol)
+                if resolved:
+                    combination, spot, missing, details = resolved
+                    result = build_single_combo_results(combination, spot, symbol, params)
+                    st.session_state.results = result
+                    st.session_state.selected_combo_idx = 0
+                    warnings = result["metrics"][0].get("_warnings", [])
+                    if missing:
+                        warnings.insert(0,
+                            f"⚠ {len(missing)} leg(s) non trouvé(s) dans la chaîne "
+                            f"yfinance (prix=0, P&L faussé) : {', '.join(missing)}"
                         )
-                        st.session_state["_combo_warnings"] = warnings
-                        st.session_state["_combo_leg_details"] = details
-                        st.session_state["_combo_net_debit"] = combination.net_debit
-                        st.rerun()
+                    st.session_state["_combo_warnings"] = warnings
+                    st.session_state["_combo_leg_details"] = details
+                    st.session_state["_combo_net_debit"] = combination.net_debit
+                    st.rerun()
 
     # ── Bouton Lancer le scan (FEAT-020) ────────────────────────────────────
     scan_clicked = st.button("🔍 Lancer le scan", type="primary", key="live_scan_btn")
