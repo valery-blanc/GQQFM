@@ -274,7 +274,8 @@ def render_sidebar() -> dict:
         )
         use_american_pricer = pricer_choice.startswith("Pricer américain")
 
-    scan_clicked = st.sidebar.button("🔍 Lancer le scan", use_container_width=True)
+    # Bouton scan déplacé en zone principale (FEAT-020)
+    scan_clicked = False
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("GPU Info")

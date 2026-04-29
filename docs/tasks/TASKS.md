@@ -352,4 +352,30 @@
 - [x] ui/components/combo_detail.py — POST /combos au lieu de git push
 - [x] ui/page_tracker.py — GET /combos + DELETE /combos/{id} au lieu de fichier local
 - [x] docs/bugs/BUG-020-tracker-sync-git-push.md
-- [ ] Déploiement : rebuild Docker sur Avignon + mkdir ~/tracker-data
+- [x] Déploiement : rebuild Docker sur Avignon + mkdir ~/tracker-data
+
+## BUG-021 — Radio P&L %/$ ferme le graphe (page Tracker)
+
+- [x] ui/page_tracker.py — show_key en session_state (toggle persistant)
+- [x] ui/page_tracker.py — pnl_data mis en cache dans session_state (pnl_key)
+- [x] ui/page_tracker.py — radio rendu dans bloc persistant, pas dans if button_clicked
+- [x] docs/bugs/BUG-021-radio-pnl-ferme-graphe.md
+
+## FEAT-020 — Bouton "Lancer le scan" en zone principale
+
+- [x] ui/components/sidebar.py — suppression du bouton (scan_clicked = False)
+- [x] ui/app.py — st.button "🔍 Lancer le scan" en zone principale (live)
+- [x] ui/page_backtest.py — st.button "🔍 Lancer le scan" en zone principale (backtest)
+- [x] docs/specs/FEAT-020-scan-button-main-area.md
+
+## FEAT-021 — Saisie directe d'un combo (bypass scan)
+
+- [x] ui/combo_parser.py — parse_combo_string(), resolve_combo_live(), resolve_combo_backtest(), build_single_combo_results()
+- [x] ui/app.py — expander "Saisir un combo directement" + bouton "Analyser"
+- [x] ui/page_backtest.py — idem pour le mode backtest (Polygon @ as_of)
+- [x] docs/specs/FEAT-021-combo-direct-input.md
+
+## FEAT-022 — Nom du combo affiché sur la page Tracker
+
+- [x] ui/page_tracker.py — _combo_to_label() + st.code(label) dans chaque expander
+- [x] docs/specs/FEAT-022-combo-name-tracker.md

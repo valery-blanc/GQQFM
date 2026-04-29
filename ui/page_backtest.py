@@ -393,7 +393,40 @@ def render_backtest_page(params: dict) -> None:
     if "bt_selected_idx" not in st.session_state:
         st.session_state.bt_selected_idx = 0
 
-    if params["scan_clicked"]:
+    scan_time  = params.get("scan_time")
+    time_label = f" @ {scan_time} ET" if scan_time else " (close EOD)"
+
+    # ── Saisie directe d'un combo (FEAT-021) ───────────────────────────────
+    from ui.combo_parser import parse_combo_string, resolve_combo_backtest, build_single_combo_results
+    with st.expander("Saisir un combo directement (sans scan)", expanded=False):
+        st.caption(
+            "Format : `L1 call SPY 17JUL2026 715 | L2 put SPY 17JUL2026 690 | "
+            "S1 call SPY 15MAY2026 745 | S2 put SPY 15MAY2026 672`  "
+            "(copier depuis la page Tracker)"
+        )
+        combo_text = st.text_area("Combo", height=68, key="bt_combo_input",
+                                  placeholder="L1 call SPY 17JUL2026 715 | S1 put SPY 15MAY2026 672")
+        if st.button("Analyser ce combo", key="bt_analyze_combo"):
+            leg_specs = parse_combo_string(combo_text)
+            if not leg_specs:
+                st.error("Format invalide.")
+            else:
+                symbol = leg_specs[0]["symbol"]
+                with st.spinner(f"Chargement prix Polygon ({symbol} @ {as_of}{time_label})…"):
+                    resolved = resolve_combo_backtest(leg_specs, symbol, as_of, scan_time)
+                if resolved:
+                    combination, spot, provider = resolved
+                    result = build_single_combo_results(
+                        combination, spot, symbol, params, as_of=as_of, provider=provider
+                    )
+                    st.session_state.bt_results = result
+                    st.session_state.bt_replay = None
+                    st.session_state.bt_selected_idx = 0
+                    st.rerun()
+
+    # ── Bouton Lancer le scan (FEAT-020) ────────────────────────────────────
+    scan_clicked = st.button("🔍 Lancer le scan", type="primary", key="bt_scan_btn")
+    if scan_clicked:
         if not params["symbols"]:
             st.error("Entrez au moins un ticker.")
             return
@@ -416,12 +449,10 @@ def render_backtest_page(params: dict) -> None:
             return
 
     results = st.session_state.bt_results
-    scan_time = params.get("scan_time")
-    time_label = f" @ {scan_time} ET" if scan_time else " (close EOD)"
     if results is None:
         st.info(
             f"Mode **Backtest**. Date : `{as_of}`{time_label}. "
-            "Configure les paramètres dans la sidebar puis clique sur **Lancer le scan**.\n\n"
+            "Saisir un combo directement ou lancer un scan.\n\n"
             "Plan Massive payant — appels illimités. "
             "Premier scan : quelques secondes à quelques minutes selon le ticker. "
             "Scans suivants sur la même date+heure : instantané (cache SQLite)."

@@ -277,7 +277,35 @@ def main():
     if "selected_combo_idx" not in st.session_state:
         st.session_state.selected_combo_idx = 0
 
-    if params["scan_clicked"]:
+    # ── Saisie directe d'un combo (FEAT-021) ───────────────────────────────
+    from ui.combo_parser import parse_combo_string, resolve_combo_live, build_single_combo_results
+    with st.expander("Saisir un combo directement (sans scan)", expanded=False):
+        st.caption(
+            "Format : `L1 call SPY 17JUL2026 715 | L2 put SPY 17JUL2026 690 | "
+            "S1 call SPY 15MAY2026 745 | S2 put SPY 15MAY2026 672`  "
+            "(copier depuis la page Tracker)"
+        )
+        combo_text = st.text_area("Combo", height=68, key="live_combo_input",
+                                  placeholder="L1 call SPY 17JUL2026 715 | S1 put SPY 15MAY2026 672")
+        if st.button("Analyser ce combo", key="live_analyze_combo"):
+            leg_specs = parse_combo_string(combo_text)
+            if not leg_specs:
+                st.error("Format invalide. Exemple : L1 call SPY 17JUL2026 715 | S1 put SPY 15MAY2026 672")
+            else:
+                symbol = leg_specs[0]["symbol"]
+                with st.spinner(f"Chargement des prix {symbol} (yfinance)…"):
+                    resolved = resolve_combo_live(leg_specs, symbol)
+                if resolved:
+                    combination, spot = resolved
+                    st.session_state.results = build_single_combo_results(
+                        combination, spot, symbol, params
+                    )
+                    st.session_state.selected_combo_idx = 0
+                    st.rerun()
+
+    # ── Bouton Lancer le scan (FEAT-020) ────────────────────────────────────
+    scan_clicked = st.button("🔍 Lancer le scan", type="primary", key="live_scan_btn")
+    if scan_clicked:
         if not params["symbols"]:
             st.error("Entrez au moins un ticker.")
         elif not params["selected_templates"]:

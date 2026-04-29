@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 
 import plotly.graph_objects as go
 import requests
@@ -10,10 +10,12 @@ import streamlit as st
 
 TRACKER_API = "http://192.168.0.222:8502"
 
+_MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"]
+
 _DELAY_NOTE = (
     "**Sources :** prix options = Polygon `day.close` (dernier prix côté de la session, "
     "free tier — peut être stale sur options illiquides) · spot = yfinance (15min delay) · "
-    "courbe théorique = prix historiques réels des options (barres Polygon), "
+    "courbe historique = prix réels des options sur barres Polygon, "
     "Black-Scholes en fallback uniquement si aucune cotation disponible sur ce créneau."
 )
 
@@ -33,6 +35,21 @@ def _api_delete(path: str, timeout: int = 5) -> bool:
         return resp.status_code == 200
     except Exception:
         return False
+
+
+def _combo_to_label(combo: dict) -> str:
+    """Génère le nom court du combo au format du tableau résultats.
+    Ex: 'L1 call SPY 17JUL2026 715 | S1 call SPY 15MAY2026 745'
+    """
+    parts = []
+    for leg in combo["legs"]:
+        d = date.fromisoformat(leg["expiration"])
+        date_str = f"{d.day:02d}{_MONTHS[d.month - 1]}{d.year}"
+        prefix = f"{'L' if leg['direction'] > 0 else 'S'}{leg['quantity']}"
+        parts.append(
+            f"{prefix} {leg['option_type']} {combo['symbol']} {date_str} {leg['strike']:g}"
+        )
+    return " | ".join(parts)
 
 
 def _combo_to_combination(combo: dict):
@@ -62,7 +79,7 @@ def _combo_to_combination(combo: dict):
 
 
 def _run_backtest_overlay(combo: dict, resolution: str = "1h") -> list | None:
-    """Lance le backtest horaire depuis as_of jusqu'à aujourd'hui. Retourne None si < 1 jour."""
+    """Lance le backtest horaire depuis as_of jusqu'à aujourd'hui. None si < 1 jour."""
     from backtesting.replay import backtest_combo_hourly
 
     as_of = date.fromisoformat(combo["as_of"])
@@ -84,12 +101,7 @@ def _plot_comparison(
     mode: str = "pct",
     bt_points: list | None = None,
 ) -> go.Figure:
-    """
-    Superpose :
-    - P&L réel collecté (Polygon day.close, vert)
-    - Spot sous-jacent (yfinance 15min delay, axe droit, jaune)
-    - P&L théorique backtest (BS sur barres Polygon, bleu pointillé) si bt_points fourni
-    """
+    """Superpose P&L réel (Polygon day.close) et optionnellement la courbe historique."""
     if not pnl_data:
         return go.Figure()
 
@@ -99,58 +111,52 @@ def _plot_comparison(
     zero_cost = abs(net_debit) < 0.01
 
     use_dollar = (mode == "dollar") or zero_cost
-
     if not use_dollar:
         y_real   = [d["pnl_pct"]    for d in pnl_data]
-        y_label  = "P&L (%)"
-        fmt_real = "%{x}<br>P&L réel: %{y:+.2f}%<extra></extra>"
-        fmt_bt   = "%{x}<br>P&L théo: %{y:+.2f}%<extra></extra>"
+        y_label, fmt_real, fmt_bt = "P&L (%)", "%{x}<br>P&L réel: %{y:+.2f}%<extra></extra>", "%{x}<br>P&L histor.: %{y:+.2f}%<extra></extra>"
         tick_fmt = ".2f"
     else:
         y_real   = [d["pnl_dollar"] for d in pnl_data]
-        y_label  = "P&L ($)"
-        fmt_real = "%{x}<br>P&L réel: $%{y:+,.2f}<extra></extra>"
-        fmt_bt   = "%{x}<br>P&L théo: $%{y:+,.2f}<extra></extra>"
+        y_label, fmt_real, fmt_bt = "P&L ($)", "%{x}<br>P&L réel: $%{y:+,.2f}<extra></extra>", "%{x}<br>P&L histor.: $%{y:+,.2f}<extra></extra>"
         tick_fmt = ",.2f"
 
     fig = go.Figure()
 
-    # Courbe théorique backtest (derrière)
     if bt_points:
-        bt_ts  = [str(p.date) for p in bt_points]
-        bt_y   = [p.pnl_pct if not use_dollar else p.pnl_dollar for p in bt_points]
-        bt_spot = [p.spot for p in bt_points]
+        bt_ts = [str(p.date) for p in bt_points]
+        bt_y  = [p.pnl_pct if not use_dollar else p.pnl_dollar for p in bt_points]
         fig.add_trace(go.Scatter(
-            x=bt_ts, y=bt_y, mode="lines", name="P&L historique Polygon (BS si pas de cotation)",
+            x=bt_ts, y=bt_y, mode="lines",
+            name="P&L historique Polygon (BS si pas de cotation)",
             line=dict(color="#636EFA", width=2, dash="dash"),
             hovertemplate=fmt_bt,
         ))
-        # Spot backtest (axe droit, gris clair) si différent du spot réel
         fig.add_trace(go.Scatter(
-            x=bt_ts, y=bt_spot, mode="lines", name="Spot backtest ($)",
+            x=bt_ts, y=[p.spot for p in bt_points], mode="lines",
+            name="Spot backtest ($)",
             line=dict(color="#9EA3B0", width=1, dash="dot"),
             yaxis="y2",
             hovertemplate="%{x}<br>Spot BT: $%{y:.2f}<extra></extra>",
-            visible="legendonly",  # caché par défaut, activable via légende
+            visible="legendonly",
         ))
 
-    # Courbe réelle (au premier plan)
     fig.add_trace(go.Scatter(
-        x=ts, y=y_real, mode="lines+markers", name="P&L réel (Polygon)",
+        x=ts, y=y_real, mode="lines+markers",
+        name="P&L réel (Polygon day.close)",
         line=dict(color="#00CC96", width=2),
         hovertemplate=fmt_real,
     ))
     fig.add_trace(go.Scatter(
-        x=ts, y=spots, mode="lines", name="Spot yfinance (15min delay)",
+        x=ts, y=spots, mode="lines",
+        name="Spot yfinance (15min delay)",
         line=dict(color="#FFD700", width=1.5),
         yaxis="y2",
         hovertemplate="%{x}<br>Spot: $%{y:.2f}<extra></extra>",
     ))
     fig.add_hline(y=0, line=dict(color="gray", dash="dash", width=1))
 
-    since = combo["tracked_since"][:10]
     fig.update_layout(
-        title=f"P&L réel vs théorique — {combo['symbol']} (tracké depuis {since})",
+        title=f"P&L réel vs historique — {combo['symbol']} (tracké depuis {combo['tracked_since'][:10]})",
         template="plotly_dark",
         xaxis=dict(title="Horodatage (ET)"),
         yaxis=dict(title=y_label, tickformat=tick_fmt),
@@ -167,7 +173,6 @@ def render_tracker_page() -> None:
     """Page principale du tracker."""
     st.title("Tracker de combos — prix réels")
 
-    # ── Statut API Avignon ──────────────────────────────────────────────────
     health = _api_get("/health")
     if health:
         st.success(
@@ -184,7 +189,6 @@ def render_tracker_page() -> None:
     st.caption(_DELAY_NOTE)
     st.markdown("---")
 
-    # ── Liste des combos trackés (depuis l'API) ─────────────────────────────
     combos = _api_get("/combos") or []
 
     if not combos:
@@ -197,26 +201,35 @@ def render_tracker_page() -> None:
     st.subheader(f"{len(combos)} combo(s) trackés")
 
     for combo in combos:
-        n_snap = combo.get("n_snapshots", "?")
-        since  = combo.get("tracked_since", "?")[:16].replace("T", " ")
-        as_of  = combo.get("as_of", "?")
+        combo_id = combo["id"]
+        n_snap   = combo.get("n_snapshots", "?")
+        since    = combo.get("tracked_since", "?")[:16].replace("T", " ")
+        as_of    = combo.get("as_of", "?")
+        net_debit = combo.get("net_debit", 0)
+        zero_cost = abs(net_debit) < 0.01
+
+        # Clés session_state
+        show_key  = f"trk_show_{combo_id}"
+        pnl_key   = f"trk_pnl_{combo_id}"
+        bt_key    = f"trk_bt_{combo_id}"
+        mode_key  = f"trk_mode_{combo_id}"
 
         with st.expander(
             f"**{combo['symbol']}** — scanné le {as_of} "
             f"| tracké depuis {since} | {n_snap} mesures",
             expanded=False,
         ):
-            # Legs
+            # ── Nom copiable ────────────────────────────────────────────────
+            label = _combo_to_label(combo)
+            st.code(label, language=None)
+
+            # ── Legs ────────────────────────────────────────────────────────
             cols = st.columns([3, 1, 1, 1, 1, 1])
-            cols[0].markdown("**Leg**")
-            cols[1].markdown("**Direction**")
-            cols[2].markdown("**Strike**")
-            cols[3].markdown("**Expiration**")
-            cols[4].markdown("**Prix entrée**")
-            cols[5].markdown("**Qté**")
+            for hdr, txt in zip(cols, ["**Leg**","**Dir.**","**Strike**","**Expir.**","**Prix entrée**","**Qté**"]):
+                hdr.markdown(txt)
             for leg in combo["legs"]:
-                d = "Long" if leg["direction"] > 0 else "Short"
                 cols = st.columns([3, 1, 1, 1, 1, 1])
+                d = "Long" if leg["direction"] > 0 else "Short"
                 cols[0].caption(leg["contract_symbol"])
                 cols[1].caption(d)
                 cols[2].caption(f"{leg['strike']:g}")
@@ -224,42 +237,58 @@ def render_tracker_page() -> None:
                 cols[4].caption(f"${leg['entry_price']:.2f}")
                 cols[5].caption(str(leg["quantity"]))
 
-            net_debit = combo.get("net_debit", 0)
-            zero_cost = abs(net_debit) < 0.01
-
+            # ── Boutons ─────────────────────────────────────────────────────
             ca, cb_, cc = st.columns([2, 2, 1])
 
-            show_real = ca.button("Afficher P&L réel", key=f"show_{combo['id']}")
-            show_bt   = cb_.button(
-                "Ajouter courbe théorique (backtest)",
-                key=f"bt_{combo['id']}",
-                help="Calcule le P&L théorique Black-Scholes sur les barres Polygon depuis l'entrée. Disponible dès le lendemain.",
-            )
+            if ca.button(
+                "Masquer P&L" if st.session_state.get(show_key) else "Afficher P&L réel",
+                key=f"btn_show_{combo_id}",
+            ):
+                new_show = not st.session_state.get(show_key, False)
+                st.session_state[show_key] = new_show
+                # Fetch P&L data au premier affichage (ou si absent)
+                if new_show and pnl_key not in st.session_state:
+                    st.session_state[pnl_key] = _api_get(f"/pnl/{combo_id}", timeout=10)
+                st.rerun()
 
-            if show_real or show_bt:
-                pnl_data = _api_get(f"/pnl/{combo['id']}", timeout=10)
+            if cb_.button(
+                "Ajouter courbe historique",
+                key=f"btn_bt_{combo_id}",
+                help="Calcule le P&L historique Polygon depuis l'entrée. Disponible dès J+1.",
+            ):
+                as_of_date = date.fromisoformat(combo["as_of"])
+                if (date.today() - as_of_date).days < 1:
+                    st.info("Courbe historique disponible dès demain.")
+                    st.session_state[bt_key] = None
+                else:
+                    with st.spinner("Calcul courbe historique (Polygon)…"):
+                        st.session_state[bt_key] = _run_backtest_overlay(combo)
+                    if not st.session_state.get(bt_key):
+                        st.warning("Pas de données Polygon pour cette période.")
+                st.session_state[show_key] = True
+                if pnl_key not in st.session_state:
+                    st.session_state[pnl_key] = _api_get(f"/pnl/{combo_id}", timeout=10)
+                st.rerun()
 
-                # Courbe backtest (si demandée ou déjà en session state)
-                bt_key = f"bt_points_{combo['id']}"
-                if show_bt:
-                    as_of_date = date.fromisoformat(combo["as_of"])
-                    days = (date.today() - as_of_date).days
-                    if days < 1:
-                        st.info(
-                            "La courbe théorique sera disponible demain — "
-                            "le backtest nécessite au moins 1 jour de barres Polygon."
-                        )
-                        st.session_state[bt_key] = None
-                    else:
-                        with st.spinner("Calcul courbe théorique (Polygon historique)…"):
-                            bt_points = _run_backtest_overlay(combo)
-                            st.session_state[bt_key] = bt_points
-                            if not bt_points:
-                                st.warning("Pas de données Polygon pour cette période.")
+            if cc.button("🗑", key=f"btn_del_{combo_id}", type="secondary",
+                         help="Supprimer du tracker"):
+                if _api_delete(f"/combos/{combo_id}"):
+                    for k in [show_key, pnl_key, bt_key, mode_key]:
+                        st.session_state.pop(k, None)
+                    st.success("Combo supprimé du tracker Avignon.")
+                    st.rerun()
+                else:
+                    st.error("Impossible de supprimer — Avignon non joignable.")
 
+            # ── Contenu P&L (persistant grâce au session_state) ─────────────
+            if st.session_state.get(show_key):
+                pnl_data  = st.session_state.get(pnl_key)
                 bt_points = st.session_state.get(bt_key)
 
-                if pnl_data:
+                if not pnl_data:
+                    st.info("Pas encore de données collectées pour ce combo.")
+                else:
+                    # Radio toujours visible ici → ne disparaît pas au rerun
                     if zero_cost:
                         mode = "dollar"
                         st.caption("Combo à coût nul — affichage en dollars.")
@@ -269,7 +298,7 @@ def render_tracker_page() -> None:
                             options=["pct", "dollar"],
                             format_func=lambda x: "% (/ débit)" if x == "pct" else "$ (absolu)",
                             horizontal=True,
-                            key=f"pnl_mode_{combo['id']}",
+                            key=mode_key,
                         )
 
                     fig = _plot_comparison(pnl_data, combo, mode=mode, bt_points=bt_points)
@@ -279,10 +308,10 @@ def render_tracker_page() -> None:
                     peak   = max(pnl_data, key=lambda d: d["pnl_dollar"])
                     trough = min(pnl_data, key=lambda d: d["pnl_dollar"])
                     mc1, mc2, mc3 = st.columns(3)
-                    mc1.metric("P&L final (réel)",  f"${final['pnl_dollar']:+,.2f}",
+                    mc1.metric("P&L final", f"${final['pnl_dollar']:+,.2f}",
                                f"{final['pnl_pct']:+.2f}%" if not zero_cost else None)
-                    mc2.metric("Peak P&L", f"${peak['pnl_dollar']:+,.2f}",
-                               f"{peak['pnl_pct']:+.2f}%" if not zero_cost else None)
+                    mc2.metric("Peak P&L",  f"${peak['pnl_dollar']:+,.2f}",
+                               f"{peak['pnl_pct']:+.2f}%"  if not zero_cost else None)
                     mc3.metric("Worst P&L", f"${trough['pnl_dollar']:+,.2f}",
                                f"{trough['pnl_pct']:+.2f}%" if not zero_cost else None)
 
@@ -290,18 +319,8 @@ def render_tracker_page() -> None:
                         bt_final = bt_points[-1]
                         delta = final["pnl_dollar"] - bt_final.pnl_dollar
                         st.caption(
-                            f"Écart réel vs théorique (dernier point) : "
+                            f"Écart réel vs historique Polygon (dernier point) : "
                             f"**{delta:+.2f}$** "
-                            f"({'réel > théo' if delta > 0 else 'réel < théo'}) — "
-                            f"reflète l'erreur de modèle BS + liquidité."
+                            f"({'réel > histor.' if delta > 0 else 'réel < histor.'}) — "
+                            f"reflète la différence entre prix cotés et barres Polygon."
                         )
-                else:
-                    st.info("Pas encore de données collectées pour ce combo.")
-
-            if cc.button("🗑 Supprimer", key=f"del_{combo['id']}", type="secondary"):
-                if _api_delete(f"/combos/{combo['id']}"):
-                    st.session_state.pop(f"bt_points_{combo['id']}", None)
-                    st.success("Combo supprimé du tracker Avignon.")
-                    st.rerun()
-                else:
-                    st.error("Impossible de supprimer — Avignon non joignable.")
