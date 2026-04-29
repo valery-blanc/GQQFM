@@ -309,14 +309,16 @@ def main():
                     resolved = resolve_combo_live(leg_specs, symbol)
                 if resolved:
                     combination, spot = resolved
-                    st.caption(
-                        f"Net debit calculé : **{combination.net_debit:+.2f}$** "
-                        "(prix yfinance re-fetchés — peut différer légèrement du scan si combo scanné il y a quelques minutes)"
-                    )
-                    st.session_state.results = build_single_combo_results(
-                        combination, spot, symbol, params
-                    )
+                    result = build_single_combo_results(combination, spot, symbol, params)
+                    st.session_state.results = result
                     st.session_state.selected_combo_idx = 0
+                    # Stocker les avertissements pour les afficher après rerun
+                    st.session_state["_combo_warnings"] = (
+                        result["metrics"][0].get("_warnings", []) +
+                        [f"Net debit calculé : {combination.net_debit:+.2f}$ "
+                         "(prix re-fetchés depuis yfinance — IV et prix peuvent "
+                         "différer du scan, surtout sur combos à forte asymétrie de quantité)"]
+                    )
                     st.rerun()
 
     # ── Bouton Lancer le scan (FEAT-020) ────────────────────────────────────
@@ -336,6 +338,10 @@ def main():
                     st.session_state.results = None
 
     results = st.session_state.results
+
+    # Avertissements persistés depuis la saisie directe
+    for w in st.session_state.pop("_combo_warnings", []):
+        st.info(w)
 
     if results is None:
         st.info("Configurez les paramètres dans la barre latérale puis cliquez sur **Lancer le scan**.")

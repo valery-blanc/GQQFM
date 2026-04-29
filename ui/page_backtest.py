@@ -433,6 +433,11 @@ def render_backtest_page(params: dict) -> None:
                     st.session_state.bt_results = result
                     st.session_state.bt_replay = None
                     st.session_state.bt_selected_idx = 0
+                    st.session_state["_combo_warnings"] = (
+                        result["metrics"][0].get("_warnings", []) +
+                        [f"Net debit calculé : {combination.net_debit:+.2f}$ "
+                         "(prix Polygon @ {as_of} — peut différer légèrement du scan)"]
+                    )
                     st.rerun()
 
     # ── Bouton Lancer le scan (FEAT-020) ────────────────────────────────────
@@ -460,6 +465,10 @@ def render_backtest_page(params: dict) -> None:
             return
 
     results = st.session_state.bt_results
+
+    for w in st.session_state.pop("_combo_warnings", []):
+        st.info(w)
+
     if results is None:
         st.info(
             f"Mode **Backtest**. Date : `{as_of}`{time_label}. "

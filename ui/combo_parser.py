@@ -165,9 +165,13 @@ def build_single_combo_results(
         tensor, spot_range, vol_scenarios, rfr,
         use_american_pricer=params.get("use_american_pricer", True),
     )
-    pnl_for_combo   = to_cpu(pnl_tensor)[:, 0, :]   # (V, M)
-    spot_range_cpu  = to_cpu(spot_range)
-    pnl_mid         = pnl_for_combo[config.VOL_MEDIAN_INDEX]
+    from scoring.probability import compute_loss_probability
+
+    # pnl_tensor shape: (V, 1, M) sur GPU
+    pnl_mid_gpu    = pnl_tensor[config.VOL_MEDIAN_INDEX]        # (1, M) GPU
+    pnl_for_combo  = to_cpu(pnl_tensor)[:, 0, :]               # (V, M) CPU
+    spot_range_cpu = to_cpu(spot_range)
+    pnl_mid        = pnl_for_combo[config.VOL_MEDIAN_INDEX]     # (M,) CPU
 
     raw_nd = combination.net_debit
     nd = abs(raw_nd) if abs(raw_nd) > 1.0 else None  # None = % non fiable
@@ -184,16 +188,22 @@ def build_single_combo_results(
     max_gain      = float(pnl_mid.max())
     max_gain_real = float(pnl_mid[real_mask].max()) if real_mask.any() else max_gain
 
+    # Probabilité de perte (distribution log-normale, même calcul que le scan)
+    loss_prob = float(to_cpu(compute_loss_probability(
+        pnl_mid_gpu, spot_range, spot, atm_vol, days_i, rfr,
+    ))[0])
+
+    warnings: list[str] = []
     if not nd:
-        st.info(
-            f"Net debit = **{raw_nd:+.2f}$** (proche de zéro ou crédit). "
-            "Les métriques en % ne sont pas fiables — affichage en dollars."
+        warnings.append(
+            f"Net debit = {raw_nd:+.2f}$ (proche de zéro ou crédit) — "
+            "métriques en % peu fiables, affichage en dollars."
         )
-        nd = 1.0  # fallback : % = $ (net_debit = 1$)
+        nd = 1.0
 
     metric = {
         "max_loss_pct":         max_loss      / nd * 100,
-        "loss_prob_pct":        0.0,
+        "loss_prob_pct":        loss_prob     * 100,
         "max_gain_pct":         max_gain      / nd * 100,
         "max_gain_real_pct":    max_gain_real / nd * 100,
         "gain_loss_ratio":      max_gain_real / abs(max_loss) if max_loss != 0 else 0.0,
@@ -202,6 +212,7 @@ def build_single_combo_results(
         "max_gain_real_dollar": max_gain_real,
         "days_to_close":        days_i,
         "daily_gain_dollar":    max_gain_real / days_i,
+        "_warnings":            warnings,   # affichés après rerun dans la page
     }
 
     result = {
