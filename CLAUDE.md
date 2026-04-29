@@ -124,6 +124,39 @@ pkill -f "streamlit run" 2>/dev/null; C:/Users/Val/AppData/Local/Programs/Python
 - `http://localhost:8501` (machine locale, pas de GPU dédié) : trop lent pour les scans. Utilisable uniquement pour tester l'UI, la navigation, et les pages qui n'exigent pas de scan (Tracker, Backtest).
 - `http://192.168.0.133:8501` (ANQA, RTX 5070 Ti) : seule machine utilisable pour tester un scan complet. Pour déployer sur ANQA : `/vb-deployANQA`.
 
+### Règle de non-régression calculs P&L (OBLIGATOIRE)
+
+**Toute modification touchant aux calculs P&L** — que ce soit dans le scan live,
+le scan backtest, la saisie directe, ou le moteur (engine/, scoring/, data/) —
+doit être suivie de :
+
+1. **Test unitaire de cohérence scan ↔ saisie directe :**
+   ```bash
+   cd C:/WORK/GQQFM
+   python tests/test_scan_vs_direct.py
+   ```
+   Vérifie que pour le **même combo** avec les **mêmes prix**, le scan et la
+   saisie directe donnent `diff = $0.00` à spot[0] (Test B).
+   Les deux pricers (américain et européen) sont testés automatiquement.
+
+2. **Revue des différences de paramètres** entre les deux chemins :
+   S'assurer que scan et saisie directe utilisent les **mêmes valeurs** pour :
+   - `entry_price` → `contract.mid`
+   - `implied_vol` → `contract.implied_vol`
+   - `div_yield` → `contract.div_yield` (attention : yfinance retourne parfois
+     en % au lieu de fraction — cf. BUG-021b ; normalisation dans provider_yfinance.py)
+   - `close_date` → `min(short expirations)` (jamais `min(all expirations)`)
+   - `days_before_close`, `vol_scenarios`, `use_american_pricer`, `risk_free_rate`
+     → tous issus du même `params` dict
+
+3. Si le test échoue (ratio > 1.05×) → investiguer avant de merger.
+
+**Fichiers sensibles** (toute modif déclenche cette règle) :
+`engine/pnl.py`, `engine/black_scholes.py`, `engine/combinator.py`,
+`data/provider_yfinance.py`, `data/provider_polygon.py`,
+`ui/app.py` (run_scan), `ui/page_backtest.py` (run_backtest_scan),
+`ui/combo_parser.py`, `ui/page_tracker.py` (_combo_to_combination)
+
 - Le commit regroupe TOUJOURS : code source + fichiers de doc + TASKS.md
 - Si l'utilisateur signale un problème après test → corriger, relancer,
   re-demander confirmation AVANT de committer
