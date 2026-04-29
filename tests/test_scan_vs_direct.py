@@ -68,7 +68,8 @@ def _log_pnl_diag(pnl_mid: np.ndarray, spot_range: np.ndarray, label: str) -> No
 
 # ── scan headless ─────────────────────────────────────────────────────────────
 
-def run_scan_headless(symbol: str = "SPY", max_combinations: int = 1000) -> tuple[dict | None, str | None]:
+def run_scan_headless(symbol: str = "SPY", max_combinations: int = 1000,
+                      use_american_pricer: bool = True) -> tuple[dict | None, str | None]:
     """
     Lance le scan sans Streamlit.
     Retourne (result_dict, combo_string_premier_combo).
@@ -121,7 +122,8 @@ def run_scan_headless(symbol: str = "SPY", max_combinations: int = 1000) -> tupl
         config.NUM_SPOT_POINTS, dtype=xp.float32,
     )
     tensor     = combinations_to_tensor(all_combinations, days_before_close=DAYS_BC)
-    pnl_tensor = compute_pnl_batch(tensor, spot_range, VOL_SCN, RFR, use_american_pricer=True)
+    pnl_tensor = compute_pnl_batch(tensor, spot_range, VOL_SCN, RFR,
+                                    use_american_pricer=use_american_pricer)
 
     net_debits  = xp.array([c.net_debit for c in all_combinations], dtype=xp.float32)
     avg_volumes = xp.array([sum(l.volume for l in c.legs) / 4 for c in all_combinations], dtype=xp.float32)
@@ -245,7 +247,8 @@ def run_scan_headless(symbol: str = "SPY", max_combinations: int = 1000) -> tupl
 # ── direct headless ───────────────────────────────────────────────────────────
 
 def run_direct_headless(combo_string: str, symbol: str = "SPY",
-                        use_scan_prices: dict | None = None) -> dict | None:
+                        use_scan_prices: dict | None = None,
+                        use_american_pricer: bool = True) -> dict | None:
     """
     Lance la saisie directe pour combo_string.
     Si use_scan_prices est fourni (dict {(exp,strike,type): (mid,iv)}),
@@ -276,23 +279,26 @@ def run_direct_headless(combo_string: str, symbol: str = "SPY",
         for spec in leg_specs:
             key = (spec["expiration"], spec["strike"], spec["option_type"])
             if key in use_scan_prices:
-                mid, iv = use_scan_prices[key]
+                entry = use_scan_prices[key]
+                mid, iv = entry[0], entry[1]
+                dv = entry[2] if len(entry) > 2 else 0.0
                 source = "SCAN_PRICES"
             else:
-                mid, iv = 0.0, 0.20
+                mid, iv, dv = 0.0, 0.20, 0.0
                 source = "NOT_FOUND"
                 log.warning("DIAG_DIRECT_LEG_MISSING  %s", key)
 
             log.info(
-                "DIAG_DIRECT_LEG  %s%d %s %g %s  mid=%.4f$  IV=%.2f%%  source=%s",
+                "DIAG_DIRECT_LEG  %s%d %s %g %s  mid=%.4f$  IV=%.2f%%  div_yield=%.4f  source=%s",
                 "L" if spec["direction"]>0 else "S", spec["quantity"],
                 spec["option_type"], spec["strike"], spec["expiration"],
-                mid, iv*100, source,
+                mid, iv*100, dv, source,
             )
             legs.append(Leg(
                 option_type=spec["option_type"], direction=spec["direction"],
                 quantity=spec["quantity"], strike=spec["strike"],
                 expiration=spec["expiration"], entry_price=mid, implied_vol=iv,
+                div_yield=dv,
                 contract_symbol=_occ_symbol(spec["symbol"], spec["expiration"],
                                             spec["option_type"], spec["strike"]),
             ))
@@ -324,7 +330,8 @@ def run_direct_headless(combo_string: str, symbol: str = "SPY",
         config.NUM_SPOT_POINTS, dtype=xp.float32,
     )
     tensor     = combinations_to_tensor([combination], days_before_close=DAYS_BC)
-    pnl_tensor = compute_pnl_batch(tensor, spot_range, VOL_SCN, RFR, use_american_pricer=True)
+    pnl_tensor = compute_pnl_batch(tensor, spot_range, VOL_SCN, RFR,
+                                    use_american_pricer=use_american_pricer)
 
     pnl_for_combo  = to_cpu(pnl_tensor)[:, 0, :]           # (V, M)
     spot_range_cpu = to_cpu(spot_range)
@@ -369,36 +376,53 @@ def compare(scan_res: dict, direct_res: dict) -> None:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
-if __name__ == "__main__":
-    combo_override = sys.argv[1] if len(sys.argv) > 1 else None
+def run_test(symbol: str = "SPY", max_combinations: int = 1000,
+             use_american_pricer: bool = True, combo_override: str | None = None) -> None:
+    pricer_label = "Américain (B-S93)" if use_american_pricer else "Européen (BS)"
+    log.info("\n" + "="*60)
+    log.info("DIAG_RUN  symbol=%s  pricer=%s", symbol, pricer_label)
+    log.info("="*60)
 
-    # 1. Scan
-    scan_res, combo_string = run_scan_headless(symbol="SPY", max_combinations=1000)
-
+    scan_res, combo_string = run_scan_headless(
+        symbol=symbol, max_combinations=max_combinations,
+        use_american_pricer=use_american_pricer,
+    )
     if not combo_string:
         log.error("Scan échoué, abandon.")
-        sys.exit(1)
+        return
 
     target_combo = combo_override or combo_string
 
-    # 2a. Saisie directe avec re-fetch yfinance (cas réel)
-    log.info("\n--- Test A : saisie directe RE-FETCH yfinance ---")
-    direct_res_A = run_direct_headless(target_combo, symbol="SPY")
+    # Test B : mêmes prix → différence doit être $0
+    log.info("\n--- Test B : MEMES PRIX que scan (doit être identique) ---")
+    scan_prices = {
+        (leg.expiration, leg.strike, leg.option_type): (leg.entry_price, leg.implied_vol, leg.div_yield)
+        for leg in scan_res["combo"].legs
+    }
+    direct_res_B = run_direct_headless(
+        target_combo, symbol=symbol,
+        use_scan_prices=scan_prices,
+        use_american_pricer=use_american_pricer,
+    )
+    if direct_res_B and scan_res:
+        log.info("\n--- Comparaison B (%s, mêmes prix) ---", pricer_label)
+        compare(scan_res, direct_res_B)
 
-    # 2b. Saisie directe avec EXACTEMENT les prix du scan (test cohérence pure)
-    if scan_res and not combo_override:
-        log.info("\n--- Test B : saisie directe MEMES PRIX que scan ---")
-        scan_prices = {
-            (leg.expiration, leg.strike, leg.option_type): (leg.entry_price, leg.implied_vol)
-            for leg in scan_res["combo"].legs
-        }
-        direct_res_B = run_direct_headless(target_combo, symbol="SPY",
-                                           use_scan_prices=scan_prices)
-        if direct_res_B:
-            log.info("\n--- Comparaison B (mêmes prix → devrait être identique) ---")
-            compare(scan_res, direct_res_B)
-
-    # 3. Comparaison A (re-fetch vs scan)
-    if scan_res and direct_res_A:
-        log.info("\n--- Comparaison A (re-fetch vs scan) ---")
+    # Test A : re-fetch yfinance (différence attendue = bruit de marché)
+    log.info("\n--- Test A : RE-FETCH yfinance ---")
+    direct_res_A = run_direct_headless(
+        target_combo, symbol=symbol,
+        use_american_pricer=use_american_pricer,
+    )
+    if direct_res_A and scan_res:
+        log.info("\n--- Comparaison A (%s, re-fetch) ---", pricer_label)
         compare(scan_res, direct_res_A)
+
+
+if __name__ == "__main__":
+    combo_override = sys.argv[1] if len(sys.argv) > 1 else None
+
+    run_test(symbol="SPY", max_combinations=1000, use_american_pricer=True,
+             combo_override=combo_override)
+    run_test(symbol="SPY", max_combinations=1000, use_american_pricer=False,
+             combo_override=combo_override)
