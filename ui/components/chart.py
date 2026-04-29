@@ -114,7 +114,7 @@ def plot_pnl_profile(
     fig.add_vline(
         x=current_spot,
         line=dict(color="black", dash="dash", width=1),
-        annotation_text=f"Spot {current_spot:.2f}",
+        annotation_text=f"Spot {current_spot:.2f} (15min delay)",
         annotation_position="bottom right",
     )
 
