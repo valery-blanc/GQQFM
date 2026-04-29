@@ -13,7 +13,8 @@ TRACKER_API = "http://192.168.0.222:8502"
 _DELAY_NOTE = (
     "**Sources :** prix options = Polygon `day.close` (dernier prix côté de la session, "
     "free tier — peut être stale sur options illiquides) · spot = yfinance (15min delay) · "
-    "courbe théorique = Black-Scholes sur barres historiques Polygon."
+    "courbe théorique = prix historiques réels des options (barres Polygon), "
+    "Black-Scholes en fallback uniquement si aucune cotation disponible sur ce créneau."
 )
 
 
@@ -120,7 +121,7 @@ def _plot_comparison(
         bt_y   = [p.pnl_pct if not use_dollar else p.pnl_dollar for p in bt_points]
         bt_spot = [p.spot for p in bt_points]
         fig.add_trace(go.Scatter(
-            x=bt_ts, y=bt_y, mode="lines", name="P&L théorique (BS/Polygon)",
+            x=bt_ts, y=bt_y, mode="lines", name="P&L historique Polygon (BS si pas de cotation)",
             line=dict(color="#636EFA", width=2, dash="dash"),
             hovertemplate=fmt_bt,
         ))
