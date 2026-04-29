@@ -1,4 +1,4 @@
-"""Collecte toutes les 30min les prix bid/ask/mid réels via Polygon snapshot."""
+"""Collecte toutes les 5min les prix réels via Polygon snapshot (free tier, 15min delay)."""
 
 from __future__ import annotations
 
@@ -60,17 +60,37 @@ def is_market_open() -> bool:
     return open_ <= now <= close_
 
 
+def get_underlying_price(ticker: str) -> float | None:
+    """Prix spot du sous-jacent via yfinance (15min delayed, gratuit)."""
+    try:
+        import yfinance as yf
+        info = yf.Ticker(ticker).fast_info
+        price = info.last_price
+        return float(price) if price else None
+    except Exception as exc:
+        logger.warning("yfinance spot %s failed: %s", ticker, exc)
+        return None
+
+
 def get_snapshot(underlying: str, contract_symbol: str) -> dict | None:
-    """Fetche le snapshot Polygon pour un contrat (données 15min delayed)."""
-    url = f"{POLYGON_BASE}/v3/snapshot/options/{underlying}/{contract_symbol}"
+    """Fetche le snapshot Polygon pour un contrat (free tier, 15min delayed).
+
+    Notes free tier :
+    - Préfixe O: obligatoire (ex: O:SPY260717C00720000)
+    - Pas de last_quote (bid/ask) — seulement day.close comme prix
+    - Pas de underlying_asset.price — appel séparé nécessaire
+    """
+    polygon_ticker = contract_symbol if contract_symbol.startswith("O:") else f"O:{contract_symbol}"
+    url = f"{POLYGON_BASE}/v3/snapshot/options/{underlying}/{polygon_ticker}"
     try:
         resp = requests.get(url, params={"apiKey": API_KEY}, timeout=15)
         if resp.status_code != 200:
+            logger.warning("Snapshot %s -> %s : %s", polygon_ticker, resp.status_code, resp.text[:120])
             return None
         results = resp.json().get("results", {})
         return results if results else None
     except Exception as exc:
-        logger.warning("Snapshot %s failed: %s", contract_symbol, exc)
+        logger.warning("Snapshot %s failed: %s", polygon_ticker, exc)
         return None
 
 
@@ -90,21 +110,35 @@ def collect_once() -> None:
         return
 
     timestamp = datetime.now(ET).strftime("%Y-%m-%dT%H:%M:%S")
-    rows: list[tuple] = []
 
+    # Récupérer le spot une fois par sous-jacent
+    underlyings = {combo["symbol"] for combo in combos}
+    spot_prices: dict[str, float | None] = {
+        sym: get_underlying_price(sym) for sym in underlyings
+    }
+
+    rows: list[tuple] = []
     for combo in combos:
         underlying = combo["symbol"]
         combo_id   = combo["id"]
+        spot       = spot_prices.get(underlying)
+
         for leg in combo["legs"]:
             snap = get_snapshot(underlying, leg["contract_symbol"])
             if snap is None:
                 continue
-            quote = snap.get("last_quote", {})
-            spot  = snap.get("underlying_asset", {}).get("price")
+
+            # Free tier : pas de bid/ask — on utilise day.close comme mid
+            day = snap.get("day", {})
+            mid = day.get("close")
+
             rows.append((
                 timestamp, combo_id, leg["contract_symbol"],
-                quote.get("bid"), quote.get("ask"), quote.get("midpoint"),
-                spot, snap.get("implied_volatility"),
+                None,   # bid — indisponible free tier
+                None,   # ask — indisponible free tier
+                mid,
+                spot,
+                snap.get("implied_volatility"),
             ))
 
     if rows:

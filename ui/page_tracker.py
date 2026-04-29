@@ -26,26 +26,32 @@ def _api_delete(path: str, timeout: int = 5) -> bool:
         return False
 
 
-def _plot_comparison(pnl_data: list[dict], combo: dict) -> go.Figure:
-    """Superpose P&L mid et P&L exécution réaliste (bid/ask)."""
+def _plot_comparison(pnl_data: list[dict], combo: dict, mode: str = "pct") -> go.Figure:
+    """Superpose P&L mid et spot. mode='pct' ou 'dollar'."""
     if not pnl_data:
         return go.Figure()
 
-    ts     = [d["timestamp"] for d in pnl_data]
-    pct    = [d["pnl_pct"]      for d in pnl_data]
-    pct_ex = [d["pnl_exec_pct"] for d in pnl_data]
-    spots  = [d["spot"]         for d in pnl_data]
+    ts    = [d["timestamp"] for d in pnl_data]
+    spots = [d["spot"]      for d in pnl_data]
+    net_debit = combo.get("net_debit", 0)
+    zero_cost = abs(net_debit) < 0.01  # combo à coût nul → forcer mode dollar
+
+    if mode == "pct" and not zero_cost:
+        y_mid  = [d["pnl_pct"]      for d in pnl_data]
+        y_label = "P&L (%)"
+        hover_mid  = "%{x}<br>P&L mid: %{y:+.2f}%<extra></extra>"
+        tick_suffix, tick_fmt = "%", ".2f"
+    else:
+        y_mid  = [d["pnl_dollar"]   for d in pnl_data]
+        y_label = "P&L ($)"
+        hover_mid  = "%{x}<br>P&L mid: $%{y:+,.2f}<extra></extra>"
+        tick_suffix, tick_fmt = "$", ",.2f"
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=ts, y=pct, mode="lines+markers", name="P&L mid (collecté)",
+        x=ts, y=y_mid, mode="lines+markers", name="P&L mid (collecté)",
         line=dict(color="#00CC96", width=2),
-        hovertemplate="%{x}<br>P&L mid: %{y:+.2f}%<extra></extra>",
-    ))
-    fig.add_trace(go.Scatter(
-        x=ts, y=pct_ex, mode="lines", name="P&L exécution (bid/ask)",
-        line=dict(color="#FFA15A", width=2, dash="dot"),
-        hovertemplate="%{x}<br>P&L exec: %{y:+.2f}%<extra></extra>",
+        hovertemplate=hover_mid,
     ))
     fig.add_trace(go.Scatter(
         x=ts, y=spots, mode="lines", name="Spot ($)",
@@ -59,7 +65,8 @@ def _plot_comparison(pnl_data: list[dict], combo: dict) -> go.Figure:
         title=f"Prix réels collectés — {combo['symbol']} (depuis {combo['tracked_since'][:10]})",
         template="plotly_dark",
         xaxis=dict(title="Horodatage (ET)"),
-        yaxis=dict(title="P&L (%)", ticksuffix="%", tickformat=".2f"),
+        yaxis=dict(title=y_label, ticksuffix=tick_suffix if mode == "pct" else "",
+                   tickprefix="" if mode == "pct" else "$", tickformat=tick_fmt),
         yaxis2=dict(title="Spot ($)", overlaying="y", side="right",
                     showgrid=False, tickformat=",.2f"),
         hovermode="x unified",
@@ -133,25 +140,33 @@ def render_tracker_page() -> None:
             if c1.button("Afficher les données réelles", key=f"show_{combo['id']}"):
                 pnl_data = _api_get(f"/pnl/{combo['id']}", timeout=10)
                 if pnl_data:
-                    fig = _plot_comparison(pnl_data, combo)
+                    net_debit = combo.get("net_debit", 0)
+                    zero_cost = abs(net_debit) < 0.01
+                    if zero_cost:
+                        mode = "dollar"
+                        st.caption("Combo à coût nul — affichage en dollars.")
+                    else:
+                        mode = st.radio(
+                            "Affichage P&L",
+                            options=["pct", "dollar"],
+                            format_func=lambda x: "% (relatif au débit)" if x == "pct" else "$ (absolu)",
+                            horizontal=True,
+                            key=f"pnl_mode_{combo['id']}",
+                        )
+
+                    fig = _plot_comparison(pnl_data, combo, mode=mode)
                     st.plotly_chart(fig, use_container_width=True)
 
                     final  = pnl_data[-1]
                     peak   = max(pnl_data, key=lambda d: d["pnl_dollar"])
                     trough = min(pnl_data, key=lambda d: d["pnl_dollar"])
                     mc1, mc2, mc3 = st.columns(3)
-                    mc1.metric("P&L final (mid)",  f"${final['pnl_dollar']:+,.2f}",
-                               f"{final['pnl_pct']:+.2f}%")
+                    mc1.metric("P&L final", f"${final['pnl_dollar']:+,.2f}",
+                               f"{final['pnl_pct']:+.2f}%" if not zero_cost else None)
                     mc2.metric("Peak P&L", f"${peak['pnl_dollar']:+,.2f}",
-                               f"{peak['pnl_pct']:+.2f}%")
+                               f"{max(pnl_data, key=lambda d: d['pnl_dollar'])['pnl_pct']:+.2f}%" if not zero_cost else None)
                     mc3.metric("Worst P&L", f"${trough['pnl_dollar']:+,.2f}",
-                               f"{trough['pnl_pct']:+.2f}%")
-                    st.caption(
-                        f"P&L exec (bid/ask réel) : final {final['pnl_exec_dollar']:+,.2f}$ "
-                        f"({final['pnl_exec_pct']:+.2f}%) — "
-                        f"écart vs mid = {final['pnl_exec_dollar']-final['pnl_dollar']:+.0f}$ "
-                        f"(coût du spread bid/ask)"
-                    )
+                               f"{min(pnl_data, key=lambda d: d['pnl_dollar'])['pnl_pct']:+.2f}%" if not zero_cost else None)
                 else:
                     st.info("Pas encore de données collectées pour ce combo.")
 
