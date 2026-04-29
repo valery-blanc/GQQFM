@@ -426,18 +426,22 @@ def render_backtest_page(params: dict) -> None:
                 with st.spinner(f"Chargement prix Polygon ({symbol} @ {as_of}{time_label})…"):
                     resolved = resolve_combo_backtest(leg_specs, symbol, as_of, scan_time)
                 if resolved:
-                    combination, spot, provider = resolved
+                    combination, spot, provider, missing, details = resolved
                     result = build_single_combo_results(
                         combination, spot, symbol, params, as_of=as_of, provider=provider
                     )
                     st.session_state.bt_results = result
                     st.session_state.bt_replay = None
                     st.session_state.bt_selected_idx = 0
-                    st.session_state["_combo_warnings"] = (
-                        result["metrics"][0].get("_warnings", []) +
-                        [f"Net debit calculé : {combination.net_debit:+.2f}$ "
-                         "(prix Polygon @ {as_of} — peut différer légèrement du scan)"]
-                    )
+                    warnings = result["metrics"][0].get("_warnings", [])
+                    if missing:
+                        warnings.insert(0,
+                            f"⚠ {len(missing)} leg(s) non trouvé(s) dans la chaîne "
+                            f"Polygon @ {as_of} (prix=0) : {', '.join(missing)}"
+                        )
+                    st.session_state["_combo_warnings"] = warnings
+                    st.session_state["_combo_leg_details"] = details
+                    st.session_state["_combo_net_debit"] = combination.net_debit
                     st.rerun()
 
     # ── Bouton Lancer le scan (FEAT-020) ────────────────────────────────────
@@ -466,8 +470,16 @@ def render_backtest_page(params: dict) -> None:
 
     results = st.session_state.bt_results
 
-    for w in st.session_state.pop("_combo_warnings", []):
-        st.info(w)
+    warnings = st.session_state.pop("_combo_warnings", [])
+    details  = st.session_state.pop("_combo_leg_details", [])
+    nd_info  = st.session_state.pop("_combo_net_debit", None)
+    for w in warnings:
+        st.warning(w) if "non trouvé" in w else st.info(w)
+    if details:
+        import pandas as pd
+        nd_txt = f" | Net debit : **{nd_info:+.2f}$**" if nd_info is not None else ""
+        st.caption(f"Prix utilisés par la saisie directe (Polygon @ as_of){nd_txt} :")
+        st.dataframe(pd.DataFrame(details), use_container_width=True, hide_index=True)
 
     if results is None:
         st.info(

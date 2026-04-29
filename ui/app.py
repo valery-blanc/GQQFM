@@ -308,17 +308,19 @@ def main():
                 with st.spinner(f"Chargement des prix {symbol} (yfinance)…"):
                     resolved = resolve_combo_live(leg_specs, symbol)
                 if resolved:
-                    combination, spot = resolved
+                    combination, spot, missing, details = resolved
                     result = build_single_combo_results(combination, spot, symbol, params)
                     st.session_state.results = result
                     st.session_state.selected_combo_idx = 0
-                    # Stocker les avertissements pour les afficher après rerun
-                    st.session_state["_combo_warnings"] = (
-                        result["metrics"][0].get("_warnings", []) +
-                        [f"Net debit calculé : {combination.net_debit:+.2f}$ "
-                         "(prix re-fetchés depuis yfinance — IV et prix peuvent "
-                         "différer du scan, surtout sur combos à forte asymétrie de quantité)"]
-                    )
+                    warnings = result["metrics"][0].get("_warnings", [])
+                    if missing:
+                        warnings.insert(0,
+                            f"⚠ {len(missing)} leg(s) non trouvé(s) dans la chaîne "
+                            f"yfinance (prix=0, P&L incorrect) : {', '.join(missing)}"
+                        )
+                    st.session_state["_combo_warnings"] = warnings
+                    st.session_state["_combo_leg_details"] = details
+                    st.session_state["_combo_net_debit"] = combination.net_debit
                     st.rerun()
 
     # ── Bouton Lancer le scan (FEAT-020) ────────────────────────────────────
@@ -339,9 +341,17 @@ def main():
 
     results = st.session_state.results
 
-    # Avertissements persistés depuis la saisie directe
-    for w in st.session_state.pop("_combo_warnings", []):
-        st.info(w)
+    # Avertissements et détails persistés depuis la saisie directe
+    warnings = st.session_state.pop("_combo_warnings", [])
+    details  = st.session_state.pop("_combo_leg_details", [])
+    nd_info  = st.session_state.pop("_combo_net_debit", None)
+    for w in warnings:
+        st.warning(w) if "non trouvé" in w else st.info(w)
+    if details:
+        import pandas as pd
+        nd_txt = f" | Net debit calculé : **{nd_info:+.2f}$**" if nd_info is not None else ""
+        st.caption(f"Prix utilisés par la saisie directe (yfinance){nd_txt} — comparer avec les prix du scan ci-dessous :")
+        st.dataframe(pd.DataFrame(details), use_container_width=True, hide_index=True)
 
     if results is None:
         st.info("Configurez les paramètres dans la barre latérale puis cliquez sur **Lancer le scan**.")

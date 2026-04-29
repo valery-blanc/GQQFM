@@ -93,26 +93,30 @@ def _legs_from_specs(
     return legs, missing
 
 
-def _warn_missing(missing: list[str], source: str) -> None:
-    if missing:
-        st.warning(
-            f"**{len(missing)} leg(s) non trouvé(s) dans la chaîne {source}** "
-            f"(prix mis à 0 — métriques P&L incorrectes) :\n"
-            + "\n".join(f"- {m}" for m in missing)
-        )
-
-
 def resolve_combo_live(
     leg_specs: list[dict], symbol: str,
-) -> tuple[Combination, float] | None:
-    """Résout les prix depuis yfinance (mode live). Retourne (Combination, spot) ou None."""
+) -> tuple[Combination, float, list[str], list[dict]] | None:
+    """
+    Résout les prix depuis yfinance.
+    Retourne (combination, spot, missing_list, leg_details) ou None.
+    leg_details : [{symbol, entry_price, implied_vol, found}] pour affichage debug.
+    """
     from data.provider_yfinance import YFinanceProvider
     try:
         chain = YFinanceProvider().get_options_chain(symbol)
         idx   = {(c.expiration, c.strike, c.option_type): c for c in chain.contracts}
         legs, missing = _legs_from_specs(leg_specs, idx)
-        _warn_missing(missing, "yfinance")
-        return _build_combination(legs), chain.underlying_price
+        details = []
+        for spec in leg_specs:
+            key = (spec["expiration"], spec["strike"], spec["option_type"])
+            c   = idx.get(key)
+            details.append({
+                "leg":         f"{'L' if spec['direction']>0 else 'S'}{spec['quantity']} {spec['option_type']} {spec['strike']:g} {spec['expiration']}",
+                "entry_price": c.mid if (c and c.mid > 0) else 0.0,
+                "implied_vol": f"{c.implied_vol*100:.1f}%" if (c and c.implied_vol > 0) else "—",
+                "found":       "✓" if (c and c.mid > 0) else "❌ non trouvé (prix=0)",
+            })
+        return _build_combination(legs), chain.underlying_price, missing, details
     except Exception as exc:
         st.error(f"Erreur chargement yfinance ({symbol}) : {exc}")
         return None
@@ -120,16 +124,25 @@ def resolve_combo_live(
 
 def resolve_combo_backtest(
     leg_specs: list[dict], symbol: str, as_of: date, scan_time: str | None = None,
-) -> tuple[Combination, float, object] | None:
-    """Résout les prix depuis Polygon à la date as_of. Retourne (Combination, spot, provider) ou None."""
+) -> tuple[Combination, float, object, list[str], list[dict]] | None:
+    """Résout les prix depuis Polygon à la date as_of."""
     from data.provider_polygon import PolygonHistoricalProvider
     try:
         provider = PolygonHistoricalProvider()
         chain    = provider.get_options_chain(symbol, as_of=as_of, scan_time=scan_time)
         idx = {(c.expiration, c.strike, c.option_type): c for c in chain.contracts}
         legs, missing = _legs_from_specs(leg_specs, idx)
-        _warn_missing(missing, f"Polygon @ {as_of}")
-        return _build_combination(legs), chain.underlying_price, provider
+        details = []
+        for spec in leg_specs:
+            key = (spec["expiration"], spec["strike"], spec["option_type"])
+            c   = idx.get(key)
+            details.append({
+                "leg":         f"{'L' if spec['direction']>0 else 'S'}{spec['quantity']} {spec['option_type']} {spec['strike']:g} {spec['expiration']}",
+                "entry_price": c.mid if (c and c.mid > 0) else 0.0,
+                "implied_vol": f"{c.implied_vol*100:.1f}%" if (c and c.implied_vol > 0) else "—",
+                "found":       "✓" if (c and c.mid > 0) else "❌ non trouvé (prix=0)",
+            })
+        return _build_combination(legs), chain.underlying_price, provider, missing, details
     except Exception as exc:
         st.error(f"Erreur chargement Polygon ({symbol} @ {as_of}) : {exc}")
         return None
