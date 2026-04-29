@@ -12,6 +12,48 @@ TRACKER_API = "http://192.168.0.222:8502"
 
 _MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"]
 
+
+def _copy_widget(text: str) -> None:
+    """Affiche le texte avec un bouton 📋 qui copie dans le presse-papiers.
+    Utilise execCommand('copy') comme fallback pour les contextes HTTP (non-HTTPS)
+    où navigator.clipboard est bloqué par le navigateur."""
+    import streamlit.components.v1 as components
+    safe = text.replace("`", "\\`").replace("\\", "\\\\")
+    components.html(
+        f"""
+        <div style="display:flex;align-items:center;gap:8px;font-family:monospace;
+                    background:#1e1e1e;border:1px solid #444;border-radius:4px;
+                    padding:6px 10px;margin-bottom:4px;">
+          <span id="lbl" style="flex:1;color:#e0e0e0;font-size:12px;
+                                word-break:break-all;">{text}</span>
+          <button onclick="copyText()" title="Copier"
+            style="background:none;border:none;cursor:pointer;font-size:16px;
+                   color:#aaa;padding:0 4px;flex-shrink:0;">📋</button>
+        </div>
+        <script>
+        function copyText() {{
+          var t = `{safe}`;
+          if (navigator.clipboard && window.isSecureContext) {{
+            navigator.clipboard.writeText(t);
+          }} else {{
+            var ta = document.createElement('textarea');
+            ta.value = t;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.focus(); ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+          }}
+          var btn = event.target;
+          btn.textContent = '✓';
+          setTimeout(function(){{ btn.textContent = '📋'; }}, 1500);
+        }}
+        </script>
+        """,
+        height=46,
+    )
+
 _DELAY_NOTE = (
     "**Sources :** prix options = Polygon `day.close` (dernier prix côté de la session, "
     "free tier — peut être stale sur options illiquides) · spot = yfinance (15min delay) · "
@@ -221,7 +263,7 @@ def render_tracker_page() -> None:
         ):
             # ── Nom copiable ────────────────────────────────────────────────
             label = _combo_to_label(combo)
-            st.code(label, language=None)
+            _copy_widget(label)
 
             # ── Legs ────────────────────────────────────────────────────────
             cols = st.columns([3, 1, 1, 1, 1, 1])

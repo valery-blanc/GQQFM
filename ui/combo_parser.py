@@ -76,7 +76,7 @@ def _legs_from_specs(leg_specs: list[dict], contract_index: dict) -> list[Leg]:
             quantity       = spec["quantity"],
             strike         = spec["strike"],
             expiration     = spec["expiration"],
-            entry_price    = contract.last_price if contract else 0.0,
+            entry_price    = contract.mid if contract else 0.0,
             implied_vol    = (contract.implied_vol if contract and contract.implied_vol > 0
                               else 0.20),
             contract_symbol = _occ_symbol(
