@@ -189,6 +189,9 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
             "days_to_close":        days_i,
             "daily_gain_dollar":    max_gain_real / days_i,
             "_atm_vol_pct":         f"{atm_vol_i*100:.1f}%",
+            "_nd_raw":              nd_raw,
+            "_nd_used":             nd,
+            "_max_loss_dollar":     max_loss,
         })
 
     # Tri par score décroissant
@@ -374,8 +377,19 @@ def main():
         st.warning(w) if "non trouvé" in w else st.info(w)
     if details:
         import pandas as pd
-        nd_txt = f" | Net debit calculé : **{nd_info:+.2f}$**" if nd_info is not None else ""
-        st.caption(f"Prix utilisés par la saisie directe (yfinance){nd_txt} — comparer avec les prix du scan ci-dessous :")
+        m0 = st.session_state.get("results", {}).get("metrics", [{}])[0] if not warnings else {}
+        # Récupérer les métriques brutes de la saisie directe depuis le résultat
+        res = st.session_state.get("results") or {}
+        m0  = (res.get("metrics") or [{}])[0]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Net debit brut ($)", f"{m0.get('_nd_raw', nd_info or 0):+.4f}" if nd_info is not None else "—")
+        c2.metric("Net debit utilisé ($)", f"{m0.get('_nd_used', 0):+.4f}")
+        c3.metric("Perte max ($)", f"{m0.get('_max_loss_dollar', 0):+.2f}")
+        c4.metric("Gain max ±1σ ($)", f"{m0.get('max_gain_real_dollar', 0):+.2f}")
+        st.caption(f"Prix utilisés par la saisie directe (yfinance) — IV ATM : {m0.get('_atm_vol_pct','?')}")
+        leg_rows_d = details[:]
+        if nd_info is not None:
+            leg_rows_d.append({"leg": "TOTAL net debit", "entry_price": nd_info, "implied_vol": "—", "found": "—"})
         st.dataframe(pd.DataFrame(details), use_container_width=True, hide_index=True)
 
     if results is None:
@@ -403,22 +417,6 @@ def main():
     combo = results["combinations"][idx]
     m = results["metrics"][idx]
     pnl_for_combo = results["pnl_per_combo"][idx]   # (V, M)
-
-    # Paramètres de calcul du Gain ±1σ — pour vérification vs saisie directe
-    with st.expander("🔍 Paramètres de calcul du Gain ±1σ (scan)", expanded=False):
-        st.caption(
-            f"**IV ATM utilisée :** {m.get('_atm_vol_pct', '?')}  |  "
-            f"**Jours J-3 :** {m.get('days_to_close', '?')}  |  "
-            f"**Fenêtre ±1σ :** {m.get('realistic_range_pct', 0):.1f}%  |  "
-            f"**Net debit :** {combo.net_debit:+.2f}$  |  "
-            f"**Spot scan :** {results['spots'][idx]:.2f}$"
-        )
-        import pandas as pd
-        leg_rows = [{"Leg": f"{'L' if l.direction>0 else 'S'}{l.quantity} {l.option_type} {l.strike:g} {l.expiration}",
-                     "Prix entrée (scan)": f"${l.entry_price:.2f}",
-                     "IV (scan)": f"{l.implied_vol*100:.1f}%"}
-                    for l in combo.legs]
-        st.dataframe(pd.DataFrame(leg_rows), use_container_width=True, hide_index=True)
 
     fig = plot_pnl_profile(
         combination=combo,

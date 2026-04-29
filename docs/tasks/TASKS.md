@@ -379,3 +379,30 @@
 
 - [x] ui/page_tracker.py — _combo_to_label() + st.code(label) dans chaque expander
 - [x] docs/specs/FEAT-022-combo-name-tracker.md
+
+## BUG-022 — real_mask ±1σ global → Gain ±1σ faux per-combo
+
+- [x] ui/app.py — real_mask calculé per-combo (IV ATM leg le plus proche du spot, jours propres)
+- [x] ui/page_backtest.py — idem
+- [x] ui/combo_parser.py — atm_vol = min by |strike-spot| (était max, incorrect)
+- [x] ui/app.py + combo_parser.py — abs(net_debit) comme dénominateur
+- [x] ui/components/results_table.py — colonnes Gain ±1σ $ et $/j ajoutées
+- [x] docs/bugs/BUG-022-real-mask-global-vs-per-combo.md
+
+## BUG-021b — div_yield yfinance en % → pricer américain faux (facteur 100)
+
+- [x] data/provider_yfinance.py — normalisation div_yield > 1.0 → ÷ 100
+- [x] ui/combo_parser.py — div_yield = contract.div_yield (était 0.0 par défaut)
+- [x] ui/page_tracker.py — idem dans _combo_to_combination
+- [x] ui/combo_parser.py — close_date = min(short expirations) (cohérence combinator)
+- [x] ui/page_tracker.py — idem
+- [x] tests/test_scan_vs_direct.py — test non-régression scan vs saisie directe (2 pricers)
+- [x] CLAUDE.md — règle non-régression + inventaire sources de données
+- [x] docs/bugs/BUG-021b-div-yield-yfinance-pct.md
+
+## FEAT-019b — Overlay backtest sur tracker + labels délai 15min
+
+- [x] ui/page_tracker.py — bouton "Ajouter courbe historique" + overlay bleu pointillé
+- [x] ui/page_tracker.py — session_state pour éviter relance du backtest
+- [x] ui/components/chart.py — annotation spot "(15min delay)"
+- [x] ui/page_tracker.py — note sources et délais en caption

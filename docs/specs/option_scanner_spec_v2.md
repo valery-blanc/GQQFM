@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-016 (2026-04-28)
+> Version : BUG-021b / BUG-022 (2026-04-29)
 
 ## 1. Vue d'ensemble
 
@@ -520,6 +520,12 @@ Le rendement de dividende continu (`div_yield`) est récupéré automatiquement
 depuis Yahoo Finance (`ticker.info["dividendYield"]`) et propagé dans chaque
 Leg puis dans le tenseur GPU.
 
+**Important (BUG-021b)** : yfinance retourne parfois `dividendYield` en
+pourcentage (ex : `1.14` pour SPY à 1.14%) au lieu de fraction décimale
+(`0.0114`). Le provider normalise : `if div_yield > 1.0: div_yield /= 100`.
+Sans cette normalisation, le pricer B-S93 utilise `q=114%` → profil P&L
+entièrement faux. La saisie directe de combo doit aussi passer `contract.div_yield`.
+
 ```python
 def bs_american_price(
     option_type, spot, strike, time_to_expiry, vol, rate, div_yield
@@ -807,6 +813,20 @@ def filter_combinations_gpu(
     7. Retourner xp.where(mask)[0]
     """
 ```
+
+**Note (BUG-022)** : Le filtre utilise des paramètres globaux (`atm_vol` =
+médiane population, `days_to_close` = médiane population). Les métriques
+affichées dans le tableau résultats sont, elles, calculées **per-combo**
+(IV ATM du leg le plus proche du spot, jours jusqu'à l'expiration des shorts).
+Cette distinction est intentionnelle : le filtre GPU ne peut pas être per-combo
+facilement ; les métriques affichées utilisent les valeurs correctes de chaque combo.
+
+Métriques per-combo (BUG-022 — post-filtrage, boucle Python) :
+- `atm_vol_i` = IV du leg dont `|strike − spot|` est minimal
+- `days_i` = `(combo.close_date − today).days`
+- `max_gain_real_i` = max P&L dans `[spot × (1−atm_vol_i×√(days_i/365)), spot × (1+...)]`
+- `nd` = `abs(net_debit)` (évite inversion de signe sur spreads à crédit)
+- Colonnes additionnelles : `Gain ±1σ $`, `$/j` (gain par jour jusqu'à J-3 short)
 
 ### 6.4 Scoring pour le classement des résultats
 
