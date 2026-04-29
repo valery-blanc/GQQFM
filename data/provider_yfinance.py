@@ -129,6 +129,10 @@ class YFinanceProvider:
             full_info = ticker.info
             raw_yield = full_info.get("dividendYield") or full_info.get("trailingAnnualDividendYield")
             div_yield = float(raw_yield) if raw_yield else 0.0
+            # yfinance retourne parfois dividendYield en % (ex: 1.14 pour 1.14%)
+            # au lieu de fraction (0.0114). Normalisation : si > 1.0 → diviser par 100.
+            if div_yield > 1.0:
+                div_yield /= 100.0
         except Exception:
             div_yield = 0.0
 
