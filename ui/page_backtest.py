@@ -207,7 +207,7 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
         "as_of": as_of,
         "provider": provider,
         "days_before_close": params.get("days_before_close", 3),
-        "realistic_range_pct": realistic_range_pct,
+        "realistic_range_pct": None,  # désormais per-combo dans metrics[i]
     }
 
 

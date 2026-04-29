@@ -210,7 +210,7 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
         "spot_range": to_cpu(spot_range),
         "spot": spot,
         "days_before_close": params.get("days_before_close", 3),
-        "realistic_range_pct": realistic_range_pct,
+        "realistic_range_pct": None,  # désormais per-combo dans metrics[i]
     }
 
 
