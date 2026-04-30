@@ -23,9 +23,9 @@ if __name__ == "__main__":
 
     scheduler = BackgroundScheduler(timezone="America/New_York")
 
-    # Collecte toutes les 30 minutes pendant les heures de marché
+    # Collecte toutes les 5 minutes pendant les heures de marché
     # (is_market_open() est vérifié dans collect_once)
-    scheduler.add_job(collect_once, "interval", minutes=30)
+    scheduler.add_job(collect_once, "interval", minutes=5)
 
     scheduler.start()
 
