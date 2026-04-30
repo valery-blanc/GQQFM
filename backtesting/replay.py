@@ -39,6 +39,11 @@ class BacktestPoint:
     leg_modes: dict[str, str] = field(default_factory=dict)
 
 
+def _polygon_option_ticker(contract_symbol: str) -> str:
+    """Assure le préfixe O: requis par l'API Polygon pour les options."""
+    return contract_symbol if contract_symbol.startswith("O:") else f"O:{contract_symbol}"
+
+
 def _extract_underlying(contract_symbol: str) -> str:
     """
     Extrait le ticker du sous-jacent depuis un contract_symbol Polygon.
@@ -109,6 +114,23 @@ def _prefetch_intraday_range(
 _prefetch_hourly_range = _prefetch_intraday_range
 
 
+def _nearest_leg_bar(
+    leg_bars: dict[datetime, tuple[float, int]],
+    dt_et: datetime,
+    max_delta: timedelta,
+) -> tuple[float, int] | None:
+    """Retourne la barre la plus proche de dt_et dans la même journée, dans max_delta."""
+    d = dt_et.date()
+    best: tuple[timedelta, tuple[float, int]] | None = None
+    for k, v in leg_bars.items():
+        if k.date() != d:
+            continue
+        delta = abs(k - dt_et)
+        if delta <= max_delta and (best is None or delta < best[0]):
+            best = (delta, v)
+    return best[1] if best is not None else None
+
+
 def _leg_value_hourly(
     leg: Leg,
     dt_et: datetime,
@@ -116,13 +138,16 @@ def _leg_value_hourly(
     leg_bars: dict[datetime, tuple[float, int]],
     rate: float,
     spot_at_leg_expiry: float | None,
+    bar_tolerance: timedelta = timedelta(minutes=35),
 ) -> tuple[float, str]:
     """Valeur d'un leg à l'heure dt_et. Identique à _leg_value_today mais clé datetime."""
     d = dt_et.date()
     if d >= leg.expiration:
         return _leg_intrinsic_at_expiry(leg, spot_at_leg_expiry or spot_today), "expired"
 
-    bar = leg_bars.get(dt_et)
+    # Lookup exact, puis nearest-neighbor pour absorber le décalage
+    # entre bornes horaires underlying (9h30, 10h30…) et options (10h00, 11h00…).
+    bar = leg_bars.get(dt_et) or _nearest_leg_bar(leg_bars, dt_et, bar_tolerance)
     if bar is not None and bar[0] > 0:
         return bar[0], "market"
 
@@ -235,7 +260,7 @@ def backtest_combo(
             f"Pré-fetch {leg.contract_symbol} ({i+1}/{n_legs})…",
         )
         all_leg_bars[leg.contract_symbol] = _prefetch_daily_range(
-            provider, leg.contract_symbol, as_of, last_day
+            provider, _polygon_option_ticker(leg.contract_symbol), as_of, last_day
         )
 
     cb(0.5, "Calcul P&L jour par jour…")
@@ -336,7 +361,8 @@ def backtest_combo_hourly(
         cb((i + 1) / (n_legs + 1),
            f"Pré-fetch {leg.contract_symbol} {resolution} ({i+1}/{n_legs})…")
         all_leg_bars[leg.contract_symbol] = _prefetch_intraday_range(
-            provider, leg.contract_symbol, as_of, last_day, multiplier, timespan
+            provider, _polygon_option_ticker(leg.contract_symbol), as_of, last_day,
+            multiplier, timespan,
         )
 
     cb(0.5, "Calcul P&L horaire…")

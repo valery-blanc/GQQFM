@@ -380,6 +380,17 @@
 - [x] ui/page_tracker.py — _combo_to_label() + st.code(label) dans chaque expander
 - [x] docs/specs/FEAT-022-combo-name-tracker.md
 
+## BUG-023 — Courbe historique tracker : tous points rouges
+
+- [x] backtesting/replay.py — `_polygon_option_ticker()` : ajoute préfixe `O:` si absent
+- [x] backtesting/replay.py — `backtest_combo` + `backtest_combo_hourly` : utilise `_polygon_option_ticker` pour les legs
+- [x] backtesting/replay.py — `_nearest_leg_bar()` + tolérance 35min dans `_leg_value_hourly` (désalignement 1h)
+- [x] ui/page_tracker.py — résolution `5min` par défaut (était `1h`)
+- [x] ui/page_tracker.py — ligne bleue continue + marqueurs rouges sans cotation
+- [x] ui/page_tracker.py — messages d'avertissement par période sans données Polygon
+- [x] data/.polygon_cache.db — 20 entrées corrompues (options sans `O:`) purgées
+- [x] docs/bugs/BUG-023-tracker-historique-polygon.md
+
 ## BUG-022 — real_mask ±1σ global → Gain ±1σ faux per-combo
 
 - [x] ui/app.py — real_mask calculé per-combo (IV ATM leg le plus proche du spot, jours propres)

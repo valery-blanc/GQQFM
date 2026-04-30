@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 import plotly.graph_objects as go
 import requests
@@ -121,7 +121,7 @@ def _combo_to_combination(combo: dict):
     )
 
 
-def _run_backtest_overlay(combo: dict, resolution: str = "1h") -> list | None:
+def _run_backtest_overlay(combo: dict, resolution: str = "5min") -> list | None:
     """Lance le backtest horaire depuis as_of jusqu'à aujourd'hui. None si < 1 jour."""
     from backtesting.replay import backtest_combo_hourly
 
@@ -168,12 +168,24 @@ def _plot_comparison(
     if bt_points:
         bt_ts = [str(p.date) for p in bt_points]
         bt_y  = [p.pnl_pct if not use_dollar else p.pnl_dollar for p in bt_points]
+        # Ligne bleue continue (tous les points)
         fig.add_trace(go.Scatter(
             x=bt_ts, y=bt_y, mode="lines",
-            name="P&L historique Polygon (BS si pas de cotation)",
-            line=dict(color="#636EFA", width=2, dash="dash"),
+            name="P&L historique Polygon",
+            line=dict(color="#636EFA", width=2),
             hovertemplate=fmt_bt,
         ))
+        # Points rouges = pas de cotation réelle (BS fallback)
+        nc_mask = [p.mode not in ("market",) for p in bt_points]
+        if any(nc_mask):
+            fig.add_trace(go.Scatter(
+                x=[t for t, m in zip(bt_ts, nc_mask) if m],
+                y=[y for y, m in zip(bt_y,  nc_mask) if m],
+                mode="markers",
+                name="Sans cotation Polygon (BS)",
+                marker=dict(color="red", size=6),
+                hovertemplate=fmt_bt,
+            ))
         fig.add_trace(go.Scatter(
             x=bt_ts, y=[p.spot for p in bt_points], mode="lines",
             name="Spot backtest ($)",
@@ -346,6 +358,35 @@ def render_tracker_page() -> None:
 
                     fig = _plot_comparison(pnl_data, combo, mode=mode, bt_points=bt_points)
                     st.plotly_chart(fig, use_container_width=True)
+
+                    # ── Avertissements données Polygon manquantes ────────────────
+                    if bt_points:
+                        no_mkt = [p for p in bt_points if p.mode not in ("market", "expired")]
+                        if no_mkt:
+                            def _fmt_dt(d: date) -> str:
+                                return d.strftime("%d/%m %H:%M") if isinstance(d, datetime) else d.strftime("%d/%m")
+                            if len(no_mkt) == len(bt_points):
+                                st.warning(
+                                    f"Données Polygon non disponibles pour les options — "
+                                    f"période complète : {_fmt_dt(bt_points[0].date)} → {_fmt_dt(bt_points[-1].date)}"
+                                )
+                            else:
+                                gaps, start, end = [], None, None
+                                for p in bt_points:
+                                    if p.mode not in ("market", "expired"):
+                                        if start is None:
+                                            start = end = p.date
+                                        else:
+                                            end = p.date
+                                    elif start is not None:
+                                        gaps.append((start, end))
+                                        start = None
+                                if start is not None:
+                                    gaps.append((start, end))
+                                for gs, ge in gaps:
+                                    st.warning(
+                                        f"Données Polygon non disponibles : {_fmt_dt(gs)} → {_fmt_dt(ge)}"
+                                    )
 
                     final  = pnl_data[-1]
                     peak   = max(pnl_data, key=lambda d: d["pnl_dollar"])
