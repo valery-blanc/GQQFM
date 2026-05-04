@@ -423,8 +423,8 @@
 - [x] docs/bugs/BUG-024-polygon-429-cursor-retry.md
 - [x] data/provider_polygon.py — `_get_full_url` + refactor `_paginated`
 - [x] docs/specs/option_scanner_spec_v2.md — roadmap V2 mise à jour
-- [ ] Déploiement ANQA + test replay horaire
-- [ ] Commit
+- [x] Déploiement ANQA (commit 65d5d66)
+- [x] Commit
 
 ## BUG-025 — Tracker graph rangebreaks manquants
 
@@ -432,12 +432,12 @@
 - [x] ui/page_tracker.py — rangebreaks dans `_plot_comparison`
 - [x] docs/specs/option_scanner_spec_v2.md — roadmap V2 mise à jour
 - [x] Test sur tracker Avignon — rangebreaks OK (confirmé utilisateur)
-- [ ] Commit
+- [x] Commit (65d5d66)
 
 ## BUG-026 — Saisie directe backtest fetche toute la chaîne
 
 - [x] docs/bugs/BUG-026-combo-direct-fetches-full-chain.md
 - [x] ui/combo_parser.py — resolve_combo_backtest : fetch ciblé par leg (5 appels au lieu de ~500)
-- [ ] docs/specs/option_scanner_spec_v2.md — §8 mise à jour
-- [ ] Déploiement ANQA + test
-- [ ] Commit
+- [x] docs/specs/option_scanner_spec_v2.md — mis à jour
+- [x] Déploiement ANQA + test — OK (confirmé utilisateur)
+- [x] Commit (a02fe19)
