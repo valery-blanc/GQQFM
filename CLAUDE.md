@@ -227,18 +227,34 @@ yfinance couvre mieux les chaînes complètes pour un ticker donné.
 | **ANQA** | PC Windows (build Android, Streamlit GQQFM secondaire) | `192.168.0.133` | Windows 11 |
 | **Avignon** | Serveur Linux 24/7 (Docker : tracker GQQFM, sites web) | `192.168.0.222` | Debian |
 
+### Contexte SSH — machine Fez
+
+Le shell bash de Claude Code tourne sur **Fez** (machine réseau). Les clés SSH
+sont dans `~/.ssh/` sur Fez (copiées depuis Tulear le 2026-05-04) :
+
+| Clé | Cible |
+|---|---|
+| `~/.ssh/id_ed25519_claude` | ANQA |
+| `~/.ssh/claude_avignon` | Avignon (alias `avignon` dans `~/.ssh/config`) |
+| `~/.ssh/id_ed25519` | GitHub (enregistrée sur compte valery-blanc) |
+
+**Git push GitHub** — toujours via SSH (remote `git@github.com:...`) :
+```bash
+eval "$(ssh-agent -s)" && ssh-add ~/.ssh/id_ed25519
+GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" git push origin master
+```
+
 ### ANQA (Windows)
 
 ```bash
-ssh -i ~/.ssh/id_ed25519_claude Val@192.168.0.133
+ssh -i ~/.ssh/id_ed25519_claude -o StrictHostKeyChecking=no Val@192.168.0.133
 # Exemple : lancer une commande PowerShell
-ssh -i ~/.ssh/id_ed25519_claude Val@192.168.0.133 'powershell -Command "..."'
+ssh -i ~/.ssh/id_ed25519_claude -o StrictHostKeyChecking=no Val@192.168.0.133 'powershell -Command "..."'
 ```
 
 - Clé : `~/.ssh/id_ed25519_claude` (sans passphrase)
 - User : `Val` (majuscule)
 - Shell natif : PowerShell — utiliser des guillemets simples bash autour de la commande SSH
-- Pas d'alias `~/.ssh/config` — toujours passer `-i ~/.ssh/id_ed25519_claude Val@192.168.0.133`
 - Déploiement GQQFM sur ANQA : voir skill `/vb-deployANQA`
 
 ### Avignon (Linux/Docker)
@@ -253,7 +269,7 @@ ssh avignon "cd ~/docker/gqqfm-tracker && docker compose logs --tail 20"
 ssh avignon "curl -s http://localhost:8502/health"
 ```
 
-- Clé : `~/.ssh/claude_avignon` (configurée dans `~/.ssh/config` sous l'alias `avignon`)
+- Clé : `~/.ssh/claude_avignon` (alias `avignon` dans `~/.ssh/config` sur Fez)
 - User : `val` (minuscule)
 - Dossiers Docker : `~/docker/<service>/` (traefik, platform, gqqfm-tracker, …)
 - Données tracker GQQFM : `~/tracker-data/` (bind mount → `/data` dans le container)
