@@ -123,6 +123,26 @@ class PolygonHistoricalProvider:
             cache_polygon.set(cache_key, data)
         return data
 
+    def _get_full_url(self, url: str) -> dict:
+        """Cache + 429 retry pour une URL Polygon complète (pages curseur de pagination)."""
+        cache_key = cache_polygon.make_key(url, {})
+        cached = cache_polygon.get(cache_key)
+        if cached is not None:
+            return cached
+
+        self._throttle()
+        sep = "&" if "?" in url else "?"
+        full_url = f"{url}{sep}apiKey={self._api_key}"
+        resp = requests.get(full_url, timeout=60)
+        if resp.status_code == 429:
+            logger.warning("Polygon 429 (cursor) — wait %.0fs and retry", _RATE_LIMIT_RETRY_SECONDS)
+            time.sleep(_RATE_LIMIT_RETRY_SECONDS)
+            resp = requests.get(full_url, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        cache_polygon.set(cache_key, data)
+        return data
+
     def _paginated(self, path: str, params: dict) -> list[dict]:
         all_results: list[dict] = []
         params = dict(params)
@@ -132,19 +152,7 @@ class PolygonHistoricalProvider:
         all_results.extend(data.get("results", []))
 
         while data.get("next_url"):
-            self._throttle()
-            url = data["next_url"]
-            sep = "&" if "?" in url else "?"
-            full_url = f"{url}{sep}apiKey={self._api_key}"
-            cache_key = cache_polygon.make_key(url, {})
-            cached = cache_polygon.get(cache_key)
-            if cached is not None:
-                data = cached
-            else:
-                resp = requests.get(full_url, timeout=60)
-                resp.raise_for_status()
-                data = resp.json()
-                cache_polygon.set(cache_key, data)
+            data = self._get_full_url(data["next_url"])
             all_results.extend(data.get("results", []))
         return all_results
 

@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : BUG-021b / BUG-022 (2026-04-29)
+> Version : BUG-025 / BUG-024 (2026-05-04)
 
 ## 1. Vue d'ensemble
 
@@ -1291,6 +1291,8 @@ pas dans `config.py`. `config.py` ne contient que les constantes moteur.
 - ✅ Replay horaire précision 1h (FEAT-016)
   - `backtest_combo_hourly` — barres 1h Massive, filtre NYSE 9h-15h ET, lun-ven
   - Pagination `next_url` suivie (`_paginated`) — Polygon retourne ~86 barres/page
+  - Pages curseur routées via `_get_full_url` (cache SQLite + retry 429) — BUG-024
+- ✅ Graphe tracker : rangebreaks weekends + hors-NYSE ajoutés (BUG-025)
   - `_plot_replay_hourly` : rangeslider + rangebreaks weekends/hors-NYSE
   - Mode dollar automatique si `net_debit < $1` (combos à coût quasi-nul)
   - Hover pré-formaté en strings Python (contourne bug format specifier Plotly)

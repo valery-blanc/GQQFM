@@ -417,3 +417,19 @@
 - [x] ui/page_tracker.py — session_state pour éviter relance du backtest
 - [x] ui/components/chart.py — annotation spot "(15min delay)"
 - [x] ui/page_tracker.py — note sources et délais en caption
+
+## BUG-024 — Polygon 429 cursor pages sans retry
+
+- [x] docs/bugs/BUG-024-polygon-429-cursor-retry.md
+- [x] data/provider_polygon.py — `_get_full_url` + refactor `_paginated`
+- [x] docs/specs/option_scanner_spec_v2.md — roadmap V2 mise à jour
+- [ ] Déploiement ANQA + test replay horaire
+- [ ] Commit
+
+## BUG-025 — Tracker graph rangebreaks manquants
+
+- [x] docs/bugs/BUG-025-tracker-graph-rangebreaks.md
+- [x] ui/page_tracker.py — rangebreaks dans `_plot_comparison`
+- [x] docs/specs/option_scanner_spec_v2.md — roadmap V2 mise à jour
+- [ ] Test sur tracker Avignon
+- [ ] Commit

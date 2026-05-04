@@ -213,7 +213,13 @@ def _plot_comparison(
     fig.update_layout(
         title=f"P&L réel vs historique — {combo['symbol']} (tracké depuis {combo['tracked_since'][:10]})",
         template="plotly_dark",
-        xaxis=dict(title="Horodatage (ET)"),
+        xaxis=dict(
+            title="Horodatage (ET)",
+            rangebreaks=[
+                dict(bounds=["sat", "mon"]),
+                dict(bounds=[16, 9.5], pattern="hour"),
+            ],
+        ),
         yaxis=dict(title=y_label, tickformat=tick_fmt),
         yaxis2=dict(title="Spot ($)", overlaying="y", side="right",
                     showgrid=False, tickformat=",.2f"),
