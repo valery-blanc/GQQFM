@@ -431,5 +431,13 @@
 - [x] docs/bugs/BUG-025-tracker-graph-rangebreaks.md
 - [x] ui/page_tracker.py — rangebreaks dans `_plot_comparison`
 - [x] docs/specs/option_scanner_spec_v2.md — roadmap V2 mise à jour
-- [ ] Test sur tracker Avignon
+- [x] Test sur tracker Avignon — rangebreaks OK (confirmé utilisateur)
+- [ ] Commit
+
+## BUG-026 — Saisie directe backtest fetche toute la chaîne
+
+- [x] docs/bugs/BUG-026-combo-direct-fetches-full-chain.md
+- [x] ui/combo_parser.py — resolve_combo_backtest : fetch ciblé par leg (5 appels au lieu de ~500)
+- [ ] docs/specs/option_scanner_spec_v2.md — §8 mise à jour
+- [ ] Déploiement ANQA + test
 - [ ] Commit

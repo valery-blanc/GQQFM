@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : BUG-025 / BUG-024 (2026-05-04)
+> Version : BUG-026 / BUG-025 / BUG-024 (2026-05-04)
 
 ## 1. Vue d'ensemble
 
@@ -1293,6 +1293,9 @@ pas dans `config.py`. `config.py` ne contient que les constantes moteur.
   - Pagination `next_url` suivie (`_paginated`) — Polygon retourne ~86 barres/page
   - Pages curseur routées via `_get_full_url` (cache SQLite + retry 429) — BUG-024
 - ✅ Graphe tracker : rangebreaks weekends + hors-NYSE ajoutés (BUG-025)
+- ✅ Saisie directe backtest : fetch ciblé par leg, pas toute la chaîne (BUG-026)
+  - `resolve_combo_backtest` : 1 appel spot + 1 par leg (au lieu de ~500)
+  - Fonctionne quelle que soit la distance au spot ou l'échéance (no filtre ±20%/90j)
   - `_plot_replay_hourly` : rangeslider + rangebreaks weekends/hors-NYSE
   - Mode dollar automatique si `net_debit < $1` (combos à coût quasi-nul)
   - Hover pré-formaté en strings Python (contourne bug format specifier Plotly)

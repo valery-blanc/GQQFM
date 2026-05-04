@@ -127,24 +127,55 @@ def resolve_combo_live(
 def resolve_combo_backtest(
     leg_specs: list[dict], symbol: str, as_of: date, scan_time: str | None = None,
 ) -> tuple[Combination, float, object, list[str], list[dict]] | None:
-    """Résout les prix depuis Polygon à la date as_of."""
+    """Résout les prix depuis Polygon à la date as_of.
+
+    Fetche uniquement les legs demandés (pas toute la chaîne) — BUG-026.
+    5 appels max au lieu de ~500 : 1 spot + 1 par leg.
+    Pas de filtre expiry/strike : fonctionne quelle que soit la distance au spot.
+    """
     from data.provider_polygon import PolygonHistoricalProvider
+    from data.provider_yfinance import _implied_vol
     try:
         provider = PolygonHistoricalProvider()
-        chain    = provider.get_options_chain(symbol, as_of=as_of, scan_time=scan_time)
-        idx = {(c.expiration, c.strike, c.option_type): c for c in chain.contracts}
-        legs, missing = _legs_from_specs(leg_specs, idx)
-        details = []
+        rate     = provider.get_risk_free_rate(as_of)
+        spot     = provider.get_underlying_close(symbol, as_of, scan_time)
+
+        legs, missing, details = [], [], []
         for spec in leg_specs:
-            key = (spec["expiration"], spec["strike"], spec["option_type"])
-            c   = idx.get(key)
+            occ = _occ_symbol(spec["symbol"], spec["expiration"], spec["option_type"], spec["strike"])
+            bar = provider.get_contract_close(f"O:{occ}", as_of, scan_time)
+
+            mid   = bar[0] if (bar and bar[0] > 0) else 0.0
+            tte   = max(0.0, (spec["expiration"] - as_of).days / 365.0)
+            iv    = 0.20
+            if mid > 0 and tte > 0:
+                iv_raw = _implied_vol(spec["option_type"], mid, spot, spec["strike"], tte, rate)
+                if 0.01 <= iv_raw <= 5.0:
+                    iv = iv_raw
+
+            found = mid > 0
+            if not found:
+                missing.append(f"{spec['option_type']} {spec['strike']:g} {spec['expiration']}")
+
+            legs.append(Leg(
+                option_type     = spec["option_type"],
+                direction       = spec["direction"],
+                quantity        = spec["quantity"],
+                strike          = spec["strike"],
+                expiration      = spec["expiration"],
+                entry_price     = mid,
+                implied_vol     = iv,
+                div_yield       = 0.0,
+                contract_symbol = f"O:{occ}",
+            ))
             details.append({
                 "leg":         f"{'L' if spec['direction']>0 else 'S'}{spec['quantity']} {spec['option_type']} {spec['strike']:g} {spec['expiration']}",
-                "entry_price": c.mid if (c and c.mid > 0) else 0.0,
-                "implied_vol": f"{c.implied_vol*100:.1f}%" if (c and c.implied_vol > 0) else "—",
-                "found":       "✓" if (c and c.mid > 0) else "❌ non trouvé (prix=0)",
+                "entry_price": mid,
+                "implied_vol": f"{iv*100:.1f}%",
+                "found":       "✓" if found else "❌ non trouvé (prix=0)",
             })
-        return _build_combination(legs), chain.underlying_price, provider, missing, details
+
+        return _build_combination(legs), spot, provider, missing, details
     except Exception as exc:
         st.error(f"Erreur chargement Polygon ({symbol} @ {as_of}) : {exc}")
         return None
