@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : BUG-026 / BUG-025 / BUG-024 (2026-05-04)
+> Version : BUG-027 / BUG-026 (2026-05-04)
 
 ## 1. Vue d'ensemble
 
@@ -1370,6 +1370,11 @@ event_score_factor :
 
 **Filtres éliminatoires :** spread>10%, volume<100, OI<500 (si données dispo),
 strikes<10, IV=0, CRITICAL en danger zone.
+
+**Garantie top_n (BUG-027) :** si les qualifiés sont moins que `top_n`, le screener
+complète avec les meilleurs tickers disqualifiés (triés par score). Ces tickers de
+"fallback" sont affichés avec ⚠ et la raison dans la sidebar. Le screener garantit
+toujours `min(top_n, nb_analysés)` résultats.
 
 **Comportement hors-séance (BUG-004) :** quand bid=ask=0 (marché fermé),
 yfinance retourne IV≈0 et OI=0. Fallbacks appliqués :

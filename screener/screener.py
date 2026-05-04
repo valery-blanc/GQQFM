@@ -109,6 +109,7 @@ class UnderlyingScreener:
 
         # ── Étape 5 : analyse options détaillée ────────────────────────────
         all_metrics: list[OptionsMetrics] = []
+        all_metrics_disq: list[OptionsMetrics] = []   # disqualifiés — secours si < top_n
         n = len(candidates)
 
         # Batch HV30 : 1 requête yfinance pour tous les tickers
@@ -150,11 +151,12 @@ class UnderlyingScreener:
                 if reason:
                     metrics.disqualification_reason = reason
                     logger.debug("Éliminé %s : %s", sym, reason)
+                    all_metrics_disq.append(metrics)   # conservé pour fallback
                     continue
 
                 all_metrics.append(metrics)
 
-        _progress(90.0, f"{len(all_metrics)} tickers qualifiés, calcul du score…")
+        _progress(90.0, f"{len(all_metrics)} qualifiés / {len(all_metrics_disq)} disqualifiés")
 
         # ── Scoring + classement ───────────────────────────────────────────
         results: list[ScreenerResult] = []
@@ -163,6 +165,20 @@ class UnderlyingScreener:
             results.append(to_screener_result(metrics, score))
 
         results.sort(key=lambda r: r.score, reverse=True)
-        _progress(100.0, f"Terminé — {len(results)} résultats, top {top_n} sélectionnés")
 
+        # ── Fallback : compléter jusqu'à top_n avec les meilleurs disqualifiés ──
+        if len(results) < top_n and all_metrics_disq:
+            disq_scored = []
+            for metrics in all_metrics_disq:
+                score = compute_score(metrics)
+                disq_scored.append(to_screener_result(metrics, score))
+            disq_scored.sort(key=lambda r: r.score, reverse=True)
+            needed = top_n - len(results)
+            results.extend(disq_scored[:needed])
+            logger.info(
+                "Fallback : %d tickers disqualifiés ajoutés pour atteindre top_%d",
+                min(needed, len(disq_scored)), top_n,
+            )
+
+        _progress(100.0, f"Terminé — {len(results)} résultats retournés (top {top_n})")
         return results[:top_n]

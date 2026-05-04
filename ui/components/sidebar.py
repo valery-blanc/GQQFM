@@ -66,10 +66,20 @@ def _render_screener_section() -> None:
     # Affichage des résultats précédents
     results: list[ScreenerResult] = st.session_state.get("screener_results", [])
     if results:
-        st.sidebar.success(f"✓ {len(results)} sous-jacent(s) trouvé(s)")
+        n_disq = sum(1 for r in results if r.disqualification_reason)
+        if n_disq:
+            st.sidebar.success(f"✓ {len(results)} sous-jacent(s) ({n_disq} fallback ⚠)")
+        else:
+            st.sidebar.success(f"✓ {len(results)} sous-jacent(s) trouvé(s)")
         for i, r in enumerate(results):
             star = " ★" if r.has_event_bonus else ""
-            st.sidebar.caption(f"{i + 1}. **{r.symbol}** (score {r.score:.0f}){star}")
+            if r.disqualification_reason:
+                st.sidebar.caption(
+                    f"{i + 1}. **{r.symbol}** (score {r.score:.0f}){star}"
+                    f" ⚠ _{r.disqualification_reason}_"
+                )
+            else:
+                st.sidebar.caption(f"{i + 1}. **{r.symbol}** (score {r.score:.0f}){star}")
 
         if st.sidebar.button("Utiliser ces résultats", key="use_screener_results"):
             # Clé intermédiaire : appliquée AVANT la création du widget text_input
