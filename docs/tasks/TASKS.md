@@ -447,6 +447,6 @@
 - [x] docs/bugs/BUG-027-screener-zero-results.md
 - [x] screener/screener.py — fallback disqualifiés pour garantir top_n résultats
 - [x] ui/components/sidebar.py — indicateur ⚠ pour résultats fallback
-- [ ] docs/specs/option_scanner_spec_v2.md — §14 mise à jour
-- [ ] Déploiement ANQA + test
-- [ ] Commit
+- [x] docs/specs/option_scanner_spec_v2.md — §14 mis à jour (garantie top_n)
+- [x] Déploiement ANQA + test — OK (confirmé utilisateur)
+- [x] Commit (0ce85b8)
