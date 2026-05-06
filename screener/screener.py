@@ -22,6 +22,7 @@ from events.calendar import EventCalendar
 from screener.behavior import UnderlyingBehavior, batch_compute_behavior
 from screener.event_filter import filter_by_events
 from screener.iv_rank import batch_compute_iv_rank_52w
+from screener.iv_rank_polygon import batch_compute_iv_rank_polygon
 from screener.models import OptionsMetrics, ScreenerResult
 from screener.options_analyzer import analyze_ticker, batch_compute_hv30
 from screener.scorer import (
@@ -174,12 +175,15 @@ class UnderlyingScreener:
 
         _progress(88.0, f"{len(all_metrics)} qualifiés / {len(all_metrics_disq)} disqualifiés")
 
-        # ── IV Rank 52w (FEAT-023 § Étape 3) — batch sur les qualifiés + disq ─
+        # ── IV Rank 52w — vrai via Polygon (FEAT-024) ou fallback HV (FEAT-023) ─
         _progress(89.0, "IV Rank 52w batch…")
         symbols_for_ivr = [m.symbol for m in all_metrics + all_metrics_disq]
         iv_map = {m.symbol: m.iv_atm_near for m in all_metrics + all_metrics_disq}
         hv_map = {m.symbol: m.hv30 for m in all_metrics + all_metrics_disq}
-        iv_rank_52w_map = batch_compute_iv_rank_52w(symbols_for_ivr, iv_map, hv_map)
+        iv_rank_52w_map = self._compute_iv_rank(
+            symbols_for_ivr, iv_map, hv_map,
+            progress_callback=lambda p, m: _progress(89.0 + p * 3, m),
+        )
         for m in all_metrics + all_metrics_disq:
             m.iv_rank_52w = iv_rank_52w_map.get(m.symbol, 50.0)
         _progress(92.0, "IV Rank 52w calculé")
@@ -212,6 +216,30 @@ class UnderlyingScreener:
 
         _progress(100.0, f"Terminé — {len(results)} résultats retournés (top {top_n}, profil {profile})")
         return results[:top_n]
+
+    def _compute_iv_rank(
+        self,
+        symbols: list[str],
+        iv_map: dict[str, float],
+        hv_map: dict[str, float],
+        progress_callback=None,
+    ) -> dict[str, float]:
+        """
+        IV Rank 52w. Préfère Polygon (FEAT-024 — vrai rank historique),
+        retombe sur l'approximation HV-based (FEAT-023) en cas d'indisponibilité.
+        """
+        try:
+            from data.provider_polygon import PolygonHistoricalProvider, resolve_polygon_key
+            if resolve_polygon_key():
+                polygon = PolygonHistoricalProvider()
+                logger.info("IV Rank : utilise Polygon (vrai rank historique)")
+                return batch_compute_iv_rank_polygon(
+                    symbols, iv_map, polygon,
+                    progress_callback=progress_callback,
+                )
+        except Exception as exc:
+            logger.warning("IV Rank Polygon indisponible (%s) — fallback HV-based", exc)
+        return batch_compute_iv_rank_52w(symbols, iv_map, hv_map)
 
     @staticmethod
     def _scorer_for_profile(profile: str):

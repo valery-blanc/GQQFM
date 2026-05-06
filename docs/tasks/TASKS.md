@@ -481,6 +481,20 @@
 - [ ] Test ANQA — top reflète qualité ATM (SPY/QQQ devraient remonter)
 - [ ] Commit
 
+## FEAT-024 — Vrai IV Rank 52w via Polygon historique
+
+- [x] docs/specs/FEAT-024-iv-rank-polygon.md
+- [x] screener/iv_rank_polygon.py — fetch_or_load_iv_history (cache parquet, refresh incrémental, parallèle)
+- [x] screener/screener.py — _compute_iv_rank avec fallback HV-based si Polygon indisponible
+- [x] tests/test_iv_rank_polygon.py
+- [ ] Test ANQA — premier run amorce le cache, classements meilleurs
+- [ ] Commit
+
+## BUG-029 — Rebalancing weights + RIC IV Rank penalty
+
+- [x] Fix F (calendar weights : calmness 0.15→0.25, IV 0.25→0.20, term 0.20→0.15)
+- [x] Fix G (RIC : pénalité IV Rank > 80 ×0.3)
+
 ### Étape 3 — Scoring multi-stratégie + behavior
 - [x] screener/behavior.py — UnderlyingBehavior (autocorr, ATR, gaps, HV ratio, beta, range pos) + batch
 - [x] screener/iv_rank.py — IV Rank 52w approximé HV-based

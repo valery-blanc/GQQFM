@@ -401,7 +401,15 @@ def compute_score_ric(
         )
         + 0.05 * _score_events(metrics.event_score_factor)
     ) * 100
-    return raw * _common_penalties(metrics)
+
+    # RIC est long vega : acheter quand IV est au plafond = payer cher pour
+    # une vol qui va probablement se compresser. Pénalité supplémentaire forte
+    # quand IV Rank > 80 (BUG-029 fix G).
+    penalty = _common_penalties(metrics)
+    if iv_rank_input > 80:
+        penalty *= 0.3
+
+    return raw * penalty
 
 
 # ── conversion OptionsMetrics → ScreenerResult ────────────────────────────────
