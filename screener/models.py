@@ -51,6 +51,9 @@ class OptionsMetrics:
     next_earnings_date: date | None = None
     next_ex_div_date: date | None = None
 
+    # ── IV Rank 52 semaines (FEAT-023 § Étape 3, approximé HV-based) ─────────
+    iv_rank_52w: float = 50.0       # 0-100, par défaut neutre
+
     # ── Liquidité ATM ciblée (FEAT-023 § Étape 2) ────────────────────────────
     # Mesurée sur calls + puts dans la zone ATM ±SCREENER_ATM_BAND_PCT (10 %).
     # Représente ce que les templates 4 jambes utilisent réellement.
@@ -96,3 +99,9 @@ class ScreenerResult:
     events_in_sweet_zone: list[str]     # noms des événements en sweet zone
     has_event_bonus: bool               # True si sweet_zone non vide
     disqualification_reason: str | None
+    # FEAT-023 Étape 3 — métriques comportementales et stratégie
+    iv_rank_52w: float = 50.0           # IV Rank approximé 52w (0-100)
+    atr_pct: float = 0.0                # ATR_20 / spot
+    hv_ratio_20_60: float = 1.0         # HV20/HV60 (>1.2 = vol qui accélère)
+    autocorr_1d: float = 0.0            # auto-corr lag-1 (≤0 = mean revert)
+    profile: str = "calendar"           # "calendar" | "ric" — score calculé selon ce profil

@@ -19,12 +19,20 @@ from typing import Callable
 
 import config
 from events.calendar import EventCalendar
+from screener.behavior import UnderlyingBehavior, batch_compute_behavior
 from screener.event_filter import filter_by_events
+from screener.iv_rank import batch_compute_iv_rank_52w
 from screener.models import OptionsMetrics, ScreenerResult
 from screener.options_analyzer import analyze_ticker, batch_compute_hv30
-from screener.scorer import check_disqualification, compute_score, to_screener_result
+from screener.scorer import (
+    check_disqualification,
+    compute_score,
+    compute_score_calendar,
+    compute_score_ric,
+    to_screener_result,
+)
 from screener.stock_filter import fast_filter_stocks
-from screener.universe import UNIVERSE
+from screener.universe import get_universe
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +70,8 @@ class UnderlyingScreener:
         near_expiry_range: tuple[int, int] = config.SCREENER_NEAR_EXPIRY_RANGE,
         far_expiry_range: tuple[int, int] = config.SCREENER_FAR_EXPIRY_RANGE,
         progress_callback: ProgressCallback | None = None,
+        profile: str = "calendar",
+        include_high_vol: bool = False,
     ) -> list[ScreenerResult]:
         """
         Lance le pipeline de screening complet.
@@ -82,8 +92,9 @@ class UnderlyingScreener:
         today = date.today()
 
         # ── Étape 1 : univers statique ─────────────────────────────────────
-        _progress(0.0, f"Univers : {len(UNIVERSE)} tickers")
-        candidates = list(UNIVERSE)
+        universe = get_universe(include_high_vol=include_high_vol)
+        _progress(0.0, f"Univers : {len(universe)} tickers (profil={profile})")
+        candidates = list(universe)
 
         # ── Étape 2 : filtre stock rapide ──────────────────────────────────
         _progress(5.0, "Filtre stock (prix, volume)…")
@@ -115,7 +126,12 @@ class UnderlyingScreener:
         # Batch HV30 : 1 requête yfinance pour tous les tickers
         _progress(35.0, f"HV30 batch ({n} tickers)…")
         hv30_map = batch_compute_hv30(candidates)
-        _progress(40.0, "HV30 calculé")
+        _progress(38.0, "HV30 calculé")
+
+        # Batch behavior (autocorr, ATR, gaps, HV ratio) — 1 requête yfinance
+        _progress(38.0, f"Behavior batch ({n} tickers)…")
+        behavior_map = batch_compute_behavior(candidates)
+        _progress(40.0, "Behavior calculé")
 
         # Analyse parallèle (ThreadPoolExecutor — délai par thread, pas global)
         def _analyze_one(sym: str) -> OptionsMetrics | None:
@@ -156,13 +172,26 @@ class UnderlyingScreener:
 
                 all_metrics.append(metrics)
 
-        _progress(90.0, f"{len(all_metrics)} qualifiés / {len(all_metrics_disq)} disqualifiés")
+        _progress(88.0, f"{len(all_metrics)} qualifiés / {len(all_metrics_disq)} disqualifiés")
 
-        # ── Scoring + classement ───────────────────────────────────────────
+        # ── IV Rank 52w (FEAT-023 § Étape 3) — batch sur les qualifiés + disq ─
+        _progress(89.0, "IV Rank 52w batch…")
+        symbols_for_ivr = [m.symbol for m in all_metrics + all_metrics_disq]
+        iv_map = {m.symbol: m.iv_atm_near for m in all_metrics + all_metrics_disq}
+        hv_map = {m.symbol: m.hv30 for m in all_metrics + all_metrics_disq}
+        iv_rank_52w_map = batch_compute_iv_rank_52w(symbols_for_ivr, iv_map, hv_map)
+        for m in all_metrics + all_metrics_disq:
+            m.iv_rank_52w = iv_rank_52w_map.get(m.symbol, 50.0)
+        _progress(92.0, "IV Rank 52w calculé")
+
+        # ── Scoring + classement (selon profil) ────────────────────────────
+        scorer = self._scorer_for_profile(profile)
+
         results: list[ScreenerResult] = []
         for metrics in all_metrics:
-            score = compute_score(metrics)
-            results.append(to_screener_result(metrics, score))
+            behavior = behavior_map.get(metrics.symbol)
+            score = scorer(metrics, behavior)
+            results.append(to_screener_result(metrics, score, behavior, profile))
 
         results.sort(key=lambda r: r.score, reverse=True)
 
@@ -170,8 +199,9 @@ class UnderlyingScreener:
         if len(results) < top_n and all_metrics_disq:
             disq_scored = []
             for metrics in all_metrics_disq:
-                score = compute_score(metrics)
-                disq_scored.append(to_screener_result(metrics, score))
+                behavior = behavior_map.get(metrics.symbol)
+                score = scorer(metrics, behavior)
+                disq_scored.append(to_screener_result(metrics, score, behavior, profile))
             disq_scored.sort(key=lambda r: r.score, reverse=True)
             needed = top_n - len(results)
             results.extend(disq_scored[:needed])
@@ -180,5 +210,15 @@ class UnderlyingScreener:
                 min(needed, len(disq_scored)), top_n,
             )
 
-        _progress(100.0, f"Terminé — {len(results)} résultats retournés (top {top_n})")
+        _progress(100.0, f"Terminé — {len(results)} résultats retournés (top {top_n}, profil {profile})")
         return results[:top_n]
+
+    @staticmethod
+    def _scorer_for_profile(profile: str):
+        """Retourne la fonction de score selon le profil cible."""
+        if profile == "ric":
+            return compute_score_ric
+        if profile == "calendar":
+            return compute_score_calendar
+        # Auto / inconnu → calendar par défaut
+        return compute_score_calendar

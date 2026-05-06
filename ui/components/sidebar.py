@@ -35,6 +35,26 @@ def _render_screener_section() -> None:
         key="screener_top_n",
     )
 
+    # FEAT-023 Étape 3 — Profil de stratégie cible
+    profile_label = st.sidebar.radio(
+        "Stratégie cible",
+        options=["Calendar / Double Calendar", "Reverse Iron Condor"],
+        index=0,
+        key="screener_profile",
+        help=(
+            "Calendar : privilégie IV Rank modéré, vol stable, mean revert.\n"
+            "Reverse IC : privilégie IV Rank bas, vol qui accélère, ATR élevé."
+        ),
+    )
+    profile = "ric" if "Reverse" in profile_label else "calendar"
+
+    include_high_vol = st.sidebar.checkbox(
+        "Inclure tickers haute vol",
+        value=False,
+        key="screener_include_high_vol",
+        help="COIN, PLTR, MRNA, BIIB, NIO, BABA, etc. — souvent inadaptés calendar.",
+    )
+
     run_screener = st.sidebar.button(
         "🔍 Trouver les meilleurs sous-jacents",
         use_container_width=True,
@@ -53,6 +73,8 @@ def _render_screener_section() -> None:
             screener = UnderlyingScreener()
             results: list[ScreenerResult] = screener.screen(
                 top_n=top_n,
+                profile=profile,
+                include_high_vol=include_high_vol,
                 progress_callback=on_progress,
             )
             st.session_state["screener_results"] = results
@@ -94,11 +116,18 @@ def _render_screener_section() -> None:
                 if r.events_in_sweet_zone:
                     events_str += f" ★ {', '.join(r.events_in_sweet_zone)}"
                 st.caption(
-                    f"**{r.symbol}** | Score {r.score:.0f} | "
-                    f"IV Rank {r.iv_rank_proxy:.0f} | "
+                    f"**{r.symbol}** | Score {r.score:.0f} ({r.profile}) | "
+                    f"IV Rank 52w {r.iv_rank_52w:.0f} | "
                     f"Term {r.term_structure_ratio:.2f} | "
-                    f"Spread {r.avg_option_spread_pct:.1%}{events_str}"
+                    f"Spread {r.avg_option_spread_pct:.1%} | "
+                    f"ATR {r.atr_pct:.1%} | "
+                    f"HV20/60 {r.hv_ratio_20_60:.2f} | "
+                    f"AC1 {r.autocorr_1d:+.2f}{events_str}"
                 )
+            st.caption(
+                "_IV Rank 52w est approximé depuis HV historique — vrai IV Rank "
+                "nécessiterait une source payante (FEAT-024 future)._"
+            )
 
     # Avertissement hors-séance
     try:

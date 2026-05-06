@@ -1354,7 +1354,47 @@ event_score_factor :
   Par MODERATE en sweet       : + 0.02 (inclus dans plafond)
 ```
 
-### 14.4 Scoring (5 composantes)
+### 14.4a Profils de scoring multi-stratégie (FEAT-023 § Étape 3)
+
+Le screener calcule **deux scores spécialisés** selon le profil cible choisi
+dans la sidebar :
+
+**Profil `calendar`** (par défaut — calendars / double calendars) :
+- IV Rank 52w optimal autour de 42 (cloche)
+- Term structure plat (0.97-1.07)
+- Qualité ATM (tradabilité 4 jambes + p25 vol/OI)
+- Calmness : auto-corr ≤ 0 + ATR < 4 % + gaps < 20 % + vol stable
+- Densité strikes & weeklies
+- Bonus events en sweet zone
+
+**Profil `ric`** (reverse iron condor) :
+- IV Rank 52w bas (sweet spot < 35)
+- Vol qui accélère (HV20/HV60 > 1.2)
+- Qualité ATM (idem)
+- ATR élevé (sous-jacent qui bouge)
+- Densité strikes
+- Bonus events
+
+**Métriques comportementales** (`screener/behavior.py`) calculées en 1 batch
+yfinance sur 3 mois d'historique + benchmark SPY pour beta :
+- `autocorr_1d` : auto-corr lag-1 sur 60j (≤ 0 = mean revert)
+- `atr_pct` : ATR_20 / spot
+- `gap_rate_2pct` : % jours avec |gap_open| > 2 % sur 60j
+- `hv_ratio_20_60` : HV20 / HV60 (> 1.2 = vol qui accélère)
+- `beta_spy`, `range_position`, `trend_strength`
+
+**IV Rank 52w** (`screener/iv_rank.py`) : approximé en reconstruisant une série
+IV historique = HV21 sliding × (current_iv / current_hv30). Imparfait mais bien
+meilleur que le proxy IV/HV30 instantané. Pour un vrai IV Rank, source payante
+nécessaire (FEAT-024 future).
+
+**Univers** (`screener/universe.py`) :
+- `UNIVERSE` (default) : ETFs indices + sectoriels + defensifs + mega-caps stables
+- `HIGH_VOL_TICKERS` : COIN, PLTR, MRNA, BIIB, NIO, BABA, etc. — pertinents RIC
+  mais inadaptés calendar. Inclus uniquement si checkbox "haute vol" cochée.
+- USO retiré (options sur futures → pricing désaligné avec BS, cohérent VIX).
+
+### 14.4 Scoring (5 composantes — profil calendar par défaut)
 
 | # | Composante | Poids | Formule |
 |---|-----------|-------|---------|

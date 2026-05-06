@@ -10,6 +10,7 @@ from datetime import date
 
 import config
 from events.models import EventImpact, EventScope
+from screener.behavior import UnderlyingBehavior
 from screener.models import OptionsMetrics, ScreenerResult
 
 
@@ -238,9 +239,146 @@ def compute_score(metrics: OptionsMetrics) -> float:
     return raw_score * penalty
 
 
+# ── Scoring multi-stratégie (FEAT-023 § Étape 3) ──────────────────────────────
+
+
+def _score_iv_rank_calendar(iv_rank_52w: float) -> float:
+    """Sweet spot calendar : IV Rank 25-60 (vol modérée). Cloche centrée 42."""
+    return max(0.0, 1.0 - abs(iv_rank_52w - 42.0) / 42.0)
+
+
+def _score_iv_rank_ric(iv_rank_52w: float) -> float:
+    """Reverse IC : IV Rank bas (<35) = bon (vol pas overpriced, place pour exploser)."""
+    if iv_rank_52w <= 15:
+        return 1.0
+    if iv_rank_52w >= 60:
+        return 0.0
+    return (60 - iv_rank_52w) / (60 - 15)
+
+
+def _score_term_structure_calendar(ratio: float) -> float:
+    """Calendar : préfère plat à léger contango (0.97-1.07). Pénalise les 2 extrêmes."""
+    if 0.97 <= ratio <= 1.07:
+        return 1.0
+    if ratio < 0.85 or ratio > 1.20:
+        return 0.0
+    if ratio < 0.97:
+        return (ratio - 0.85) / (0.97 - 0.85)
+    return (1.20 - ratio) / (1.20 - 1.07)
+
+
+def _score_calmness(behavior: UnderlyingBehavior) -> float:
+    """
+    Score de "calme" du sous-jacent (calendar-friendly).
+    Mix : auto-corr (mean revert), ATR bas, peu de gaps, vol stable.
+    """
+    # Mean revert : autocorr ≤ 0 = score 1, ≥ 0.3 = score 0
+    autocorr_score = max(0.0, min(1.0, (0.30 - behavior.autocorr_1d) / 0.30))
+    # ATR : 1 % = score 1, 4 % = score 0
+    atr_score = max(0.0, min(1.0, (0.04 - behavior.atr_pct) / (0.04 - 0.01)))
+    # Gaps : 0 % = score 1, 20 % = score 0
+    gap_score = max(0.0, min(1.0, (0.20 - behavior.gap_rate_2pct) / 0.20))
+    # Vol stable : ratio HV20/HV60 ≈ 1 = score 1, écart fort = score 0
+    stability = 1.0 - min(1.0, abs(behavior.hv_ratio_20_60 - 1.0) / 0.5)
+    return 0.30 * autocorr_score + 0.30 * atr_score + 0.20 * gap_score + 0.20 * stability
+
+
+def _score_vol_acceleration(hv_ratio_20_60: float) -> float:
+    """RIC : préfère vol qui accélère. ratio≥1.4 = 1, ≤1.0 = 0."""
+    if hv_ratio_20_60 >= 1.4:
+        return 1.0
+    if hv_ratio_20_60 <= 1.0:
+        return 0.0
+    return (hv_ratio_20_60 - 1.0) / 0.4
+
+
+def _score_atr(atr_pct: float) -> float:
+    """RIC : ATR > 1.5 % bon (sous-jacent qui bouge). Plafonné à 5 %."""
+    return max(0.0, min(1.0, (atr_pct - 0.005) / (0.05 - 0.005)))
+
+
+def _common_penalties(metrics: OptionsMetrics) -> float:
+    """Pénalités multiplicatives partagées (ex-div, macro CRITICAL, backwardation)."""
+    penalty = 1.0
+    if metrics.next_ex_div_date is not None:
+        today = date.today()
+        far_days = (metrics.far_expiry - today).days
+        days_to_xd = (metrics.next_ex_div_date - today).days
+        if 0 <= days_to_xd <= far_days + 7:
+            penalty *= config.SCREENER_PENALTY_EX_DIV
+    if metrics.term_structure_ratio > 1.20:
+        penalty *= config.SCREENER_PENALTY_BACKWARDATION
+    macro_crit = any(
+        ev.impact == EventImpact.CRITICAL and ev.scope == EventScope.MACRO
+        for ev in metrics.events_in_danger_zone
+    )
+    if macro_crit:
+        penalty *= config.SCREENER_PENALTY_MACRO_CRITICAL
+    return penalty
+
+
+def compute_score_calendar(
+    metrics: OptionsMetrics,
+    behavior: UnderlyingBehavior | None = None,
+) -> float:
+    """
+    Score 0-100 pour stratégies calendar / double-calendar.
+    Privilégie : IV Rank modéré, term structure plat, vol stable, mean revert.
+
+    Si `behavior` est None, retombe sur compute_score legacy (pour rétrocompat tests).
+    """
+    if behavior is None:
+        return compute_score(metrics)
+
+    iv_rank_input = metrics.iv_rank_52w if metrics.iv_rank_52w != 50.0 else metrics.iv_rank_proxy
+    raw = (
+        0.25 * _score_iv_rank_calendar(iv_rank_input)
+        + 0.20 * _score_term_structure_calendar(metrics.term_structure_ratio)
+        + 0.20 * _score_atm_quality(metrics)
+        + 0.15 * _score_calmness(behavior)
+        + 0.10 * _score_density(
+            (metrics.strike_count_near + metrics.strike_count_far) / 2,
+            metrics.weekly_count,
+        )
+        + 0.10 * _score_events(metrics.event_score_factor)
+    ) * 100
+    return raw * _common_penalties(metrics)
+
+
+def compute_score_ric(
+    metrics: OptionsMetrics,
+    behavior: UnderlyingBehavior | None = None,
+) -> float:
+    """
+    Score 0-100 pour reverse iron condor.
+    Privilégie : IV Rank bas, vol qui accélère, ATR élevé.
+    """
+    if behavior is None:
+        return compute_score(metrics)
+
+    iv_rank_input = metrics.iv_rank_52w if metrics.iv_rank_52w != 50.0 else metrics.iv_rank_proxy
+    raw = (
+        0.30 * _score_iv_rank_ric(iv_rank_input)
+        + 0.20 * _score_vol_acceleration(behavior.hv_ratio_20_60)
+        + 0.20 * _score_atm_quality(metrics)
+        + 0.15 * _score_atr(behavior.atr_pct)
+        + 0.10 * _score_density(
+            (metrics.strike_count_near + metrics.strike_count_far) / 2,
+            metrics.weekly_count,
+        )
+        + 0.05 * _score_events(metrics.event_score_factor)
+    ) * 100
+    return raw * _common_penalties(metrics)
+
+
 # ── conversion OptionsMetrics → ScreenerResult ────────────────────────────────
 
-def to_screener_result(metrics: OptionsMetrics, score: float) -> ScreenerResult:
+def to_screener_result(
+    metrics: OptionsMetrics,
+    score: float,
+    behavior: UnderlyingBehavior | None = None,
+    profile: str = "calendar",
+) -> ScreenerResult:
     avg_volume = (metrics.avg_volume_near + metrics.avg_volume_far) / 2
     avg_oi = (metrics.avg_oi_near + metrics.avg_oi_far) / 2
 
@@ -262,4 +400,9 @@ def to_screener_result(metrics: OptionsMetrics, score: float) -> ScreenerResult:
         events_in_sweet_zone=[ev.name for ev in metrics.events_in_sweet_zone],
         has_event_bonus=bool(metrics.events_in_sweet_zone),
         disqualification_reason=metrics.disqualification_reason,
+        iv_rank_52w=round(metrics.iv_rank_52w, 1),
+        atr_pct=round(behavior.atr_pct, 4) if behavior else 0.0,
+        hv_ratio_20_60=round(behavior.hv_ratio_20_60, 3) if behavior else 1.0,
+        autocorr_1d=round(behavior.autocorr_1d, 3) if behavior else 0.0,
+        profile=profile,
     )

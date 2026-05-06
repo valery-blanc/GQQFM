@@ -482,14 +482,15 @@
 - [ ] Commit
 
 ### Étape 3 — Scoring multi-stratégie + behavior
-- [ ] screener/behavior.py (nouveau) — UnderlyingBehavior + batch
-- [ ] screener/iv_rank.py (nouveau) — IV Rank 52w approximé
-- [ ] screener/options_analyzer.py — skew 25-delta
-- [ ] screener/scorer.py — `compute_score_calendar` + `compute_score_ric`
-- [ ] screener/universe.py — révision (retrait MRNA/NIO/BABA, ajout EFA/IEF)
-- [ ] ui/components/sidebar.py — radio stratégie cible
-- [ ] ui/components/results_table.py — nouvelles colonnes
-- [ ] tests/test_behavior.py + test_iv_rank.py + test_scoring_multi.py
-- [ ] docs/specs/option_scanner_spec_v2.md — §14 refonte complète
-- [ ] Test ANQA — top 5 cohérent par profil
+- [x] screener/behavior.py — UnderlyingBehavior (autocorr, ATR, gaps, HV ratio, beta, range pos) + batch
+- [x] screener/iv_rank.py — IV Rank 52w approximé HV-based
+- [ ] screener/options_analyzer.py — skew 25-delta (reporté à FEAT-024)
+- [x] screener/scorer.py — `compute_score_calendar` + `compute_score_ric` + composantes
+- [x] screener/universe.py — HIGH_VOL_TICKERS + get_universe(include_high_vol), retrait USO, ajout EFA/IEMG/LQD/IEF/PEP/KO
+- [x] screener/screener.py — branchement profile + behavior + iv_rank_52w batch
+- [x] screener/models.py — ScreenerResult étendu (iv_rank_52w, atr_pct, hv_ratio, autocorr, profile)
+- [x] ui/components/sidebar.py — radio "Stratégie cible" + checkbox haute vol + détails enrichis
+- [x] tests/test_behavior.py + test_iv_rank.py + test_scoring_multi.py
+- [x] docs/specs/option_scanner_spec_v2.md — §14 mis à jour
+- [ ] Test ANQA — top par profil cohérent
 - [ ] Commit
