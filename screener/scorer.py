@@ -351,11 +351,15 @@ def compute_score_calendar(
         return compute_score(metrics)
 
     iv_rank_input = metrics.iv_rank_52w if metrics.iv_rank_52w != 50.0 else metrics.iv_rank_proxy
+    # Pondérations rebalancées (BUG-029 fix F) : la calmness (vraie mesure du
+    # comportement du sous-jacent) prime sur l'IV Rank approximé et le term
+    # ratio bruité par les events. C'est elle qui distingue un vrai sous-jacent
+    # calendar-friendly d'un sous-jacent juste à IV correct.
     raw = (
-        0.25 * _score_iv_rank_calendar(iv_rank_input)
-        + 0.20 * _score_term_structure_calendar(metrics.term_structure_ratio)
+        0.20 * _score_iv_rank_calendar(iv_rank_input)
+        + 0.15 * _score_term_structure_calendar(metrics.term_structure_ratio)
         + 0.20 * _score_atm_quality(metrics)
-        + 0.15 * _score_calmness(behavior)
+        + 0.25 * _score_calmness(behavior)
         + 0.10 * _score_density(
             (metrics.strike_count_near + metrics.strike_count_far) / 2,
             metrics.weekly_count,
