@@ -124,6 +124,31 @@ pkill -f "streamlit run" 2>/dev/null; C:/Users/Val/AppData/Local/Programs/Python
 - `http://localhost:8501` (machine locale, pas de GPU dédié) : trop lent pour les scans. Utilisable uniquement pour tester l'UI, la navigation, et les pages qui n'exigent pas de scan (Tracker, Backtest).
 - `http://192.168.0.133:8501` (ANQA, RTX 5070 Ti) : seule machine utilisable pour tester un scan complet. Pour déployer sur ANQA : `/vb-deployANQA`.
 
+### Règle d'autonomie maximale (OBLIGATOIRE)
+
+**Faire moi-même tout ce qui peut être fait sans Val.** Ne jamais demander à Val
+de lancer une commande, déployer, redémarrer un service, ou exécuter un test
+quand je peux le faire moi-même via les outils disponibles (Bash, SSH, skills).
+
+En particulier, dès qu'un fix touche le code et qu'il faut le tester sur ANQA :
+**lancer `/vb-deployANQA` directement, sans demander confirmation**. Si ANQA est
+éteint (ping qui échoue), seulement alors prévenir Val.
+
+Le rôle de Val dans la boucle est exclusivement :
+- Valider que le résultat fonctionnel est correct (jugement métier).
+- Décider des trade-offs produit (ex : "veut-on garder ce ticker dans l'univers ?").
+- Approuver les actions à fort blast-radius non-réversibles (force-push, suppression
+  de branches, opérations destructives).
+
+Tout le reste — commit, push, deploy, restart, run tests, lire logs, vérifier
+ports — c'est à moi de faire de bout en bout sans intervention.
+
+**Exception confirmée** : la règle "pas de commit avant test utilisateur" se lit
+désormais comme "pas de commit *final de validation* avant test utilisateur".
+Pendant l'itération je peux committer/pousser/déployer librement pour permettre
+le test sur ANQA — chaque commit itératif est candidat au revert si Val signale
+un problème.
+
 ### Règle de non-régression calculs P&L (OBLIGATOIRE)
 
 **Toute modification touchant aux calculs P&L** — que ce soit dans le scan live,

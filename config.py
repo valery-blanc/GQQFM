@@ -59,6 +59,7 @@ SCREENER_SCORE_WEIGHT_EVENTS: float = 0.15
 SCREENER_PENALTY_EX_DIV: float = 0.3
 SCREENER_PENALTY_HIGH_IV_RANK: float = 0.5
 SCREENER_PENALTY_BACKWARDATION: float = 0.7
+SCREENER_PENALTY_MACRO_CRITICAL: float = 0.6  # FOMC/NFP/CPI en danger zone (BUG-028)
 
 # ── Scanner expiry ranges (sélection de paires événementielles) ──
 # Defaults durcis (FEAT-011) : la fenêtre 14-35 j sur le short évite le gamma

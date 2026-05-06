@@ -450,3 +450,45 @@
 - [x] docs/specs/option_scanner_spec_v2.md — §14 mis à jour (garantie top_n)
 - [x] Déploiement ANQA + test — OK (confirmé utilisateur)
 - [x] Commit (0ce85b8)
+
+## BUG-028 — Screener élimine 100 % des tickers les jours FOMC/NFP/CPI
+
+- [x] docs/bugs/BUG-028-screener-fomc-disqualification.md
+- [x] events/models.py — `MarketEvent.scope` déjà renseigné MACRO/MICRO partout (vérifié)
+- [x] screener/scorer.py — `critical_event_in_near` filtre uniquement scope=MICRO
+- [x] screener/scorer.py — `compute_score` ajoute pénalité macro CRITICAL en danger zone
+- [x] config.py — `SCREENER_PENALTY_MACRO_CRITICAL = 0.6`
+- [x] tests/test_screener_scoring.py — tests macro vs micro
+- [x] docs/specs/option_scanner_spec_v2.md — §14 séparation macro/micro
+- [ ] Test ANQA en séance — top 5 réel (pas fallback)
+- [ ] Commit
+
+## FEAT-023 — Refonte du screener (3 étapes)
+
+- [x] docs/specs/FEAT-023-screener-refonte.md (spec complète)
+
+### Étape 1 — Fix BUG-028 (cf. ci-dessus)
+
+### Étape 2 — Liquidité ATM-ciblée
+- [ ] screener/options_analyzer.py — `compute_atm_liquidity` (zone ATM ±10%)
+- [ ] screener/options_analyzer.py — `analyze_ticker` mesure calls + puts
+- [ ] screener/models.py — nouveaux champs OptionsMetrics ATM
+- [ ] screener/scorer.py — règles éliminatoires recalibrées
+- [ ] screener/scorer.py — `_score_tradability`
+- [ ] config.py — nouveaux seuils SCREENER_*_ATM
+- [ ] tests/test_screener_filters.py — tests ATM
+- [ ] Test ANQA — SPY/QQQ/AAPL passent sans fallback
+- [ ] Commit
+
+### Étape 3 — Scoring multi-stratégie + behavior
+- [ ] screener/behavior.py (nouveau) — UnderlyingBehavior + batch
+- [ ] screener/iv_rank.py (nouveau) — IV Rank 52w approximé
+- [ ] screener/options_analyzer.py — skew 25-delta
+- [ ] screener/scorer.py — `compute_score_calendar` + `compute_score_ric`
+- [ ] screener/universe.py — révision (retrait MRNA/NIO/BABA, ajout EFA/IEF)
+- [ ] ui/components/sidebar.py — radio stratégie cible
+- [ ] ui/components/results_table.py — nouvelles colonnes
+- [ ] tests/test_behavior.py + test_iv_rank.py + test_scoring_multi.py
+- [ ] docs/specs/option_scanner_spec_v2.md — §14 refonte complète
+- [ ] Test ANQA — top 5 cohérent par profil
+- [ ] Commit

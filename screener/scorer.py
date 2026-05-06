@@ -9,7 +9,7 @@ import math
 from datetime import date
 
 import config
-from events.models import EventImpact
+from events.models import EventImpact, EventScope
 from screener.models import OptionsMetrics, ScreenerResult
 
 
@@ -25,8 +25,13 @@ DISQUALIFICATION_RULES: dict[str, callable] = {
     ),
     "not_enough_strikes": lambda m: min(m.strike_count_near, m.strike_count_far) < config.SCREENER_MIN_STRIKE_COUNT,
     "iv_data_missing": lambda m: m.iv_atm_near <= 0 or m.iv_atm_far <= 0,
+    # Seuls les événements MICRO (earnings, ex-div, FDA) éliminent un ticker.
+    # Les événements MACRO (FOMC, NFP, CPI) affectent tout le marché — ils
+    # pénalisent le score via event_score_factor mais ne disqualifient pas
+    # (cf. BUG-028).
     "critical_event_in_near": lambda m: any(
-        ev.impact == EventImpact.CRITICAL for ev in m.events_in_danger_zone
+        ev.impact == EventImpact.CRITICAL and ev.scope == EventScope.MICRO
+        for ev in m.events_in_danger_zone
     ),
 }
 
@@ -131,6 +136,15 @@ def compute_score(metrics: OptionsMetrics) -> float:
     # Backwardation forte (far >> near)
     if metrics.term_structure_ratio > 1.15:
         penalty *= config.SCREENER_PENALTY_BACKWARDATION       # 0.7
+
+    # Événement macro CRITICAL en danger zone (FOMC, NFP, CPI) :
+    # pénalité forte mais pas éliminatoire — cf. BUG-028.
+    macro_critical_in_near = any(
+        ev.impact == EventImpact.CRITICAL and ev.scope == EventScope.MACRO
+        for ev in metrics.events_in_danger_zone
+    )
+    if macro_critical_in_near:
+        penalty *= config.SCREENER_PENALTY_MACRO_CRITICAL      # 0.6
 
     return raw_score * penalty
 

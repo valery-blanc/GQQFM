@@ -189,10 +189,20 @@ def get_atm_iv(
 _OI_UNAVAILABLE = 999_999.0  # Sentinelle OI : données absentes → filtre no_open_interest désactivé
 
 
-def compute_chain_liquidity(chain_df) -> tuple[float, float, float]:
+def compute_chain_liquidity(
+    chain_df,
+    spot: float | None = None,
+    atm_band_pct: float = 0.15,
+) -> tuple[float, float, float]:
     """
     Calcule les métriques de liquidité depuis une chaîne d'options.
     Retourne (avg_spread_pct, avg_volume, avg_open_interest).
+
+    Si `spot` est fourni, le **spread médian** est calculé uniquement sur les
+    strikes dans la zone ATM ±atm_band_pct (par défaut ±15 %). Évite la
+    dilution par les wings OTM dont le spread % est mécaniquement énorme
+    (option à $0.05 avec spread $0.05 = 100 %). Volume et OI restent calculés
+    sur la chaîne entière (V1 — l'étape 2 de FEAT-023 fera de même pour eux).
 
     Hors-séance (bid=ask=0 pour tout ou partie de la chaîne) :
     - spread_pct = 0.0 quand aucun mid valide (non pénalisé par spread_too_wide)
@@ -213,12 +223,23 @@ def compute_chain_liquidity(chain_df) -> tuple[float, float, float]:
         else:
             avg_oi = _OI_UNAVAILABLE  # yfinance OI non disponible → skip filtre
 
-        # Spread bid-ask en % du mid
-        mid = (df["bid"] + df["ask"]) / 2
+        # Spread bid-ask en % du mid — restreint à la zone ATM si spot fourni
+        if spot is not None and spot > 0:
+            band = spot * atm_band_pct
+            atm_df = df[(df["strike"] >= spot - band) & (df["strike"] <= spot + band)]
+            # Si la zone ATM est vide ou trop fine, fallback sur la chaîne entière
+            if len(atm_df) >= 3:
+                df_for_spread = atm_df
+            else:
+                df_for_spread = df
+        else:
+            df_for_spread = df
+
+        mid = (df_for_spread["bid"] + df_for_spread["ask"]) / 2
         valid_mid = mid[mid > 0]
         if valid_mid.empty:
             return 0.0, avg_volume, avg_oi
-        spread = df.loc[valid_mid.index, "ask"] - df.loc[valid_mid.index, "bid"]
+        spread = df_for_spread.loc[valid_mid.index, "ask"] - df_for_spread.loc[valid_mid.index, "bid"]
         spread_pct = float((spread / valid_mid).median())
 
         return spread_pct, avg_volume, avg_oi
@@ -306,9 +327,9 @@ def analyze_ticker(
         # Term structure ratio
         term_ratio = iv_far / iv_near if iv_near > 0 else 1.0
 
-        # Liquidité
-        spread_near, vol_near, oi_near = compute_chain_liquidity(near_calls)
-        spread_far, vol_far, oi_far = compute_chain_liquidity(far_calls)
+        # Liquidité — spread mesuré sur ATM ±15 % (cf. BUG-028 hotfix)
+        spread_near, vol_near, oi_near = compute_chain_liquidity(near_calls, spot=spot_price)
+        spread_far, vol_far, oi_far = compute_chain_liquidity(far_calls, spot=spot_price)
         avg_spread = (spread_near + spread_far) / 2
 
         # Densité strikes

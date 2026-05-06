@@ -210,8 +210,24 @@ def test_disqualification_iv_missing():
     assert check_disqualification(metrics) == "iv_data_missing"
 
 
-def test_disqualification_critical_in_danger():
-    """FOMC en danger zone → disqualifié."""
+def test_disqualification_critical_micro_in_danger():
+    """BUG-028 : event MICRO CRITICAL (ex: FDA) en danger zone → disqualifié."""
+    fda = MarketEvent(
+        date=date.today() + timedelta(days=5),
+        name="FDA Decision",
+        impact=EventImpact.CRITICAL,
+        scope=EventScope.MICRO,
+        symbol="TEST",
+    )
+    metrics = make_metrics(events_in_danger_zone=[fda])
+    assert check_disqualification(metrics) == "critical_event_in_near"
+
+
+def test_no_disqualification_critical_macro_in_danger():
+    """
+    BUG-028 : event MACRO CRITICAL (FOMC, NFP, CPI) en danger zone ne
+    disqualifie pas — il pénalise uniquement le score (×0.6).
+    """
     fomc = MarketEvent(
         date=date.today() + timedelta(days=5),
         name="FOMC",
@@ -219,4 +235,27 @@ def test_disqualification_critical_in_danger():
         scope=EventScope.MACRO,
     )
     metrics = make_metrics(events_in_danger_zone=[fomc])
-    assert check_disqualification(metrics) == "critical_event_in_near"
+    assert check_disqualification(metrics) is None
+
+
+def test_macro_critical_penalty_applied():
+    """
+    BUG-028 : un FOMC en danger zone applique une pénalité ×0.6 au score
+    (sans toucher event_score_factor pour isoler la pénalité).
+    """
+    no_event = make_metrics(event_score_factor=1.0)
+    with_fomc = make_metrics(
+        event_score_factor=1.0,  # isole la pénalité macro de event_score_factor
+        events_in_danger_zone=[
+            MarketEvent(
+                date=date.today() + timedelta(days=5),
+                name="FOMC",
+                impact=EventImpact.CRITICAL,
+                scope=EventScope.MACRO,
+            )
+        ],
+    )
+    score_clean = compute_score(no_event)
+    score_fomc = compute_score(with_fomc)
+    # Pénalité 0.6
+    assert score_fomc == pytest.approx(score_clean * 0.6, rel=0.01)

@@ -1366,10 +1366,15 @@ event_score_factor :
 
 **IV Rank proxy :** `clip((iv_atm_near / hv30 - 0.6) / 1.2 × 100, 0, 100)`
 **Term structure ratio :** `iv_atm_far / iv_atm_near`
-**Pénalités :** ×0.3 ex-div, ×0.5 IV Rank>70, ×0.7 backwardation>1.15
+**Pénalités :** ×0.3 ex-div, ×0.5 IV Rank>70, ×0.7 backwardation>1.15,
+×0.6 macro CRITICAL en danger zone (FOMC/NFP/CPI — BUG-028).
 
 **Filtres éliminatoires :** spread>10%, volume<100, OI<500 (si données dispo),
-strikes<10, IV=0, CRITICAL en danger zone.
+strikes<10, IV=0, CRITICAL **MICRO** en danger zone (earnings/ex-div/FDA).
+Les événements CRITICAL **MACRO** (FOMC, NFP, CPI) ne disqualifient pas — ils
+affectent tout le marché de façon corrélée et seraient sinon un *kill switch*
+qui vide l'univers à chaque jour FOMC (BUG-028). Ils sont gérés par pénalité
+score uniquement.
 
 **Garantie top_n (BUG-027) :** si les qualifiés sont moins que `top_n`, le screener
 complète avec les meilleurs tickers disqualifiés (triés par score). Ces tickers de
