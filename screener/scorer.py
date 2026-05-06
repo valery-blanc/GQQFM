@@ -313,7 +313,14 @@ def _score_atr(atr_pct: float) -> float:
 
 
 def _common_penalties(metrics: OptionsMetrics) -> float:
-    """Pénalités multiplicatives partagées (ex-div, macro CRITICAL, backwardation)."""
+    """
+    Pénalités multiplicatives partagées (ex-div, macro CRITICAL).
+
+    Note BUG-029 : la pénalité backwardation a été retirée — elle dupliquait
+    `_score_term_structure_calendar` (qui pénalise déjà via le score, floor 0.20).
+    La double pénalité tuait SPY les jours FOMC où le ratio iv_far/iv_near est
+    artificiellement élevé par le vol crush post-event.
+    """
     penalty = 1.0
     if metrics.next_ex_div_date is not None:
         today = date.today()
@@ -321,8 +328,6 @@ def _common_penalties(metrics: OptionsMetrics) -> float:
         days_to_xd = (metrics.next_ex_div_date - today).days
         if 0 <= days_to_xd <= far_days + 7:
             penalty *= config.SCREENER_PENALTY_EX_DIV
-    if metrics.term_structure_ratio > 1.20:
-        penalty *= config.SCREENER_PENALTY_BACKWARDATION
     macro_crit = any(
         ev.impact == EventImpact.CRITICAL and ev.scope == EventScope.MACRO
         for ev in metrics.events_in_danger_zone
