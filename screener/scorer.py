@@ -257,20 +257,30 @@ def _score_iv_rank_ric(iv_rank_52w: float) -> float:
 
 
 def _score_term_structure_calendar(ratio: float) -> float:
-    """Calendar : préfère plat à léger contango (0.97-1.07). Pénalise les 2 extrêmes."""
+    """
+    Calendar : préfère plat à léger contango (0.97-1.07). Pénalise les 2 extrêmes
+    avec un floor à 0.20 — éviter qu'une mesure aberrante (ex. SPY ratio=1.53
+    causé par une expiration courte post-FOMC avec IV bruitée) anéantisse
+    complètement le score d'un sous-jacent par ailleurs excellent.
+    """
     if 0.97 <= ratio <= 1.07:
         return 1.0
+    floor = 0.20
     if ratio < 0.85 or ratio > 1.20:
-        return 0.0
+        return floor
     if ratio < 0.97:
-        return (ratio - 0.85) / (0.97 - 0.85)
-    return (1.20 - ratio) / (1.20 - 1.07)
+        return floor + (1.0 - floor) * (ratio - 0.85) / (0.97 - 0.85)
+    return floor + (1.0 - floor) * (1.20 - ratio) / (1.20 - 1.07)
 
 
 def _score_calmness(behavior: UnderlyingBehavior) -> float:
     """
     Score de "calme" du sous-jacent (calendar-friendly).
-    Mix : auto-corr (mean revert), ATR bas, peu de gaps, vol stable.
+    Mix : auto-corr (mean revert), ATR bas, peu de gaps, vol qui se compresse.
+
+    Note : pour calendar, vol qui DÉCÉLÈRE (HV20/60 < 1) est un BONUS, pas un
+    malus — l'option near vendue perd sa prime plus vite. Seule la vol qui
+    accélère est pénalisée.
     """
     # Mean revert : autocorr ≤ 0 = score 1, ≥ 0.3 = score 0
     autocorr_score = max(0.0, min(1.0, (0.30 - behavior.autocorr_1d) / 0.30))
@@ -278,9 +288,14 @@ def _score_calmness(behavior: UnderlyingBehavior) -> float:
     atr_score = max(0.0, min(1.0, (0.04 - behavior.atr_pct) / (0.04 - 0.01)))
     # Gaps : 0 % = score 1, 20 % = score 0
     gap_score = max(0.0, min(1.0, (0.20 - behavior.gap_rate_2pct) / 0.20))
-    # Vol stable : ratio HV20/HV60 ≈ 1 = score 1, écart fort = score 0
-    stability = 1.0 - min(1.0, abs(behavior.hv_ratio_20_60 - 1.0) / 0.5)
-    return 0.30 * autocorr_score + 0.30 * atr_score + 0.20 * gap_score + 0.20 * stability
+    # Vol qui se compresse (HV20/60 ≤ 1) = bon ; vol qui accélère (>1.1) = mauvais
+    if behavior.hv_ratio_20_60 <= 1.0:
+        compression_score = 1.0
+    elif behavior.hv_ratio_20_60 >= 1.30:
+        compression_score = 0.0
+    else:
+        compression_score = (1.30 - behavior.hv_ratio_20_60) / 0.30
+    return 0.30 * autocorr_score + 0.30 * atr_score + 0.20 * gap_score + 0.20 * compression_score
 
 
 def _score_vol_acceleration(hv_ratio_20_60: float) -> float:
@@ -342,7 +357,16 @@ def compute_score_calendar(
         )
         + 0.10 * _score_events(metrics.event_score_factor)
     ) * 100
-    return raw * _common_penalties(metrics)
+
+    # Pénalité IV Rank trop élevé spécifique calendar : vol overpriced, mauvais
+    # moment pour acheter (long vega du calendar) — IV crush probable.
+    penalty = _common_penalties(metrics)
+    if iv_rank_input > 85:
+        penalty *= 0.3   # quasi élimination
+    elif iv_rank_input > 70:
+        penalty *= config.SCREENER_PENALTY_HIGH_IV_RANK  # 0.5
+
+    return raw * penalty
 
 
 def compute_score_ric(

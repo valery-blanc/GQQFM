@@ -70,8 +70,15 @@ def test_term_structure_calendar_optimal_flat():
 
 
 def test_term_structure_calendar_penalizes_extremes():
-    assert _score_term_structure_calendar(0.85) == pytest.approx(0.0)
-    assert _score_term_structure_calendar(1.20) == pytest.approx(0.0)
+    """Bord du domaine régulier : score = floor 0.20 (pas un cliff à 0)."""
+    assert _score_term_structure_calendar(0.85) == pytest.approx(0.20)
+    assert _score_term_structure_calendar(1.20) == pytest.approx(0.20)
+
+
+def test_term_structure_calendar_floor_aberrant():
+    """Mesure aberrante (ratio 1.53) → floor 0.20 (pas zéro), évite tuer un bon ticker."""
+    assert _score_term_structure_calendar(1.53) == pytest.approx(0.20)
+    assert _score_term_structure_calendar(0.50) == pytest.approx(0.20)
 
 
 # ── Composantes RIC ───────────────────────────────────────────────────────────
@@ -112,6 +119,37 @@ def test_calendar_score_prefers_low_iv_stable():
     bad_b = _make_behavior(autocorr_1d=0.4, atr_pct=0.05, gap_rate_2pct=0.30, hv_ratio_20_60=1.5)
 
     assert compute_score_calendar(good, good_b) > compute_score_calendar(bad, bad_b)
+
+
+def test_calendar_penalizes_high_iv_rank():
+    """IV Rank > 70 → pénalité ×0.5 ; > 85 → ×0.3 (vol overpriced, mauvais pour acheter)."""
+    base = _make_metrics(iv_rank_52w=42.0)
+    high = _make_metrics(iv_rank_52w=75.0)
+    extreme = _make_metrics(iv_rank_52w=90.0)
+    b = _make_behavior()
+
+    s_base = compute_score_calendar(base, b)
+    s_high = compute_score_calendar(high, b)
+    s_extreme = compute_score_calendar(extreme, b)
+
+    # Plus l'IV Rank est haut, plus le score est bas (au-delà de 70)
+    assert s_base > s_high > s_extreme
+
+
+def test_calendar_rewards_vol_compression():
+    """Vol qui décélère (HV20/60 < 1) est un bonus calendar, pas une pénalité."""
+    metrics = _make_metrics()
+    b_decel = _make_behavior(hv_ratio_20_60=0.70)   # vol qui se compresse
+    b_stable = _make_behavior(hv_ratio_20_60=1.00)
+    b_accel = _make_behavior(hv_ratio_20_60=1.30)   # vol qui accélère
+
+    s_decel = compute_score_calendar(metrics, b_decel)
+    s_stable = compute_score_calendar(metrics, b_stable)
+    s_accel = compute_score_calendar(metrics, b_accel)
+
+    # Vol qui décélère ≥ vol stable > vol qui accélère
+    assert s_decel == pytest.approx(s_stable, rel=0.01)  # même score (compression maxée à 1)
+    assert s_stable > s_accel
 
 
 def test_ric_score_prefers_vol_acceleration():
