@@ -15,14 +15,40 @@ from screener.models import OptionsMetrics, ScreenerResult
 
 # ── filtres éliminatoires ─────────────────────────────────────────────────────
 
+def _max_spread_pct_atm(m: OptionsMetrics) -> float:
+    """Max(spread% near, spread% far). Si les deux sont à 0 (legacy / non
+    renseigné), retombe sur le legacy `avg_bid_ask_spread_pct`."""
+    if m.spread_pct_atm_near > 0 or m.spread_pct_atm_far > 0:
+        return max(m.spread_pct_atm_near, m.spread_pct_atm_far)
+    return m.avg_bid_ask_spread_pct
+
+
 DISQUALIFICATION_RULES: dict[str, callable] = {
-    "spread_too_wide": lambda m: m.avg_bid_ask_spread_pct > config.SCREENER_MAX_SPREAD_PCT,
-    "no_volume": lambda m: (m.avg_volume_near + m.avg_volume_far) / 2 < config.SCREENER_MIN_AVG_OPTION_VOLUME,
-    # OI check désactivé quand les données OI sont indisponibles (valeur sentinelle 999_999)
-    "no_open_interest": lambda m: (
-        m.avg_oi_near < 999_000 and m.avg_oi_far < 999_000
-        and (m.avg_oi_near + m.avg_oi_far) / 2 < config.SCREENER_MIN_AVG_OPEN_INTEREST
+    # Spread bid/ask % ATM > 12 % sur near OU far : 4 jambes × 12 % ≈ 48 % du
+    # débit perdu en frottement. Mesure ATM-ciblée (FEAT-023 § Étape 2).
+    "spread_too_wide": lambda m: _max_spread_pct_atm(m) > config.SCREENER_MAX_SPREAD_PCT_ATM,
+    # Volume p25 ATM near : la jambe la plus faible parmi celles potentiellement
+    # utilisées doit avoir au moins SCREENER_MIN_VOLUME_P25_ATM contrats traités.
+    # Skipping si p25=0 ET volume_median=0 (hors-séance — yfinance ne remonte
+    # pas le volume du dernier jour).
+    "no_volume_atm": lambda m: (
+        m.volume_atm_median_near > 0
+        and m.volume_atm_p25_near < config.SCREENER_MIN_VOLUME_P25_ATM
     ),
+    # OI p25 ATM avec gestion sentinelle hors-séance (999_999 = OI indisponible).
+    # Activé seulement si oi_median_near a été mesuré et n'est pas une sentinelle.
+    "no_oi_atm": lambda m: (
+        0 < m.oi_atm_median_near < 999_000
+        and m.oi_atm_p25_near < config.SCREENER_MIN_OI_P25_ATM
+    ),
+    # Pas assez de strikes dans la zone ATM ±band (besoin de 4 strikes mini
+    # pour qu'un combo 4 jambes ait du choix).
+    "not_enough_strikes_atm": lambda m: min(
+        m.strike_count_atm_near, m.strike_count_atm_far
+    ) < config.SCREENER_MIN_STRIKES_ATM if (
+        m.strike_count_atm_near > 0 or m.strike_count_atm_far > 0
+    ) else False,
+    # Conservé : densité chaîne entière (filet de sécurité pour tickers rares)
     "not_enough_strikes": lambda m: min(m.strike_count_near, m.strike_count_far) < config.SCREENER_MIN_STRIKE_COUNT,
     "iv_data_missing": lambda m: m.iv_atm_near <= 0 or m.iv_atm_far <= 0,
     # Seuls les événements MICRO (earnings, ex-div, FDA) éliminent un ticker.
@@ -85,6 +111,68 @@ def _score_liquidity(
     return 0.4 * spread_score + 0.3 * volume_score + 0.3 * oi_score
 
 
+def _score_tradability(metrics: OptionsMetrics) -> float:
+    """
+    Score 0-1 du **coût d'entrée + sortie 4 jambes** en % du prix moyen ATM.
+
+    Un combo 4 jambes paie 4 fois le spread bid-ask à l'entrée et 4 fois à la
+    sortie (en réalité on capture du mid-fill, mais l'ordre de grandeur reste).
+    Formule : `cost_pct ≈ 4 × spread_pct_moyen_ATM`.
+
+    score = 1.0 quand cost_pct ≤ 5 %, décroît linéairement → 0 à cost_pct = 30 %.
+
+    Si les champs ATM ne sont pas renseignés (legacy), retombe sur 0.5 (neutre).
+    """
+    if metrics.spread_pct_atm_near <= 0 and metrics.spread_pct_atm_far <= 0:
+        return 0.5
+    avg_spread = (metrics.spread_pct_atm_near + metrics.spread_pct_atm_far) / 2
+    cost_pct = 4 * avg_spread
+    if cost_pct <= 0.05:
+        return 1.0
+    if cost_pct >= 0.30:
+        return 0.0
+    return (0.30 - cost_pct) / (0.30 - 0.05)
+
+
+def _score_atm_quality(metrics: OptionsMetrics) -> float:
+    """
+    Score 0-1 combinant tradabilité (spread 4 jambes), profondeur volume ATM p25,
+    et profondeur OI ATM p25. Remplace `_score_liquidity` quand les champs ATM
+    sont renseignés ; sinon retombe sur le score liquidité legacy pour compat.
+
+    Mix : 0.50 tradability + 0.25 volume_p25_log + 0.25 oi_p25_log.
+    Le volume et l'OI sont log-scales : différencie les ordres de grandeur.
+    """
+    has_atm = (
+        metrics.spread_pct_atm_near > 0 or metrics.spread_pct_atm_far > 0
+        or metrics.volume_atm_median_near > 0
+    )
+    if not has_atm:
+        # Legacy : retombe sur le score liquidité historique
+        avg_volume = (metrics.avg_volume_near + metrics.avg_volume_far) / 2
+        avg_oi = (metrics.avg_oi_near + metrics.avg_oi_far) / 2
+        return _score_liquidity(metrics.avg_bid_ask_spread_pct, avg_volume, avg_oi)
+
+    tradability = _score_tradability(metrics)
+
+    # Volume p25 score (log) — vol_min=20 (seuil disqualif), vol_max=10_000
+    vol_min, vol_max = 20.0, 10_000.0
+    log_vol_range = math.log(vol_max / vol_min)
+    vol_p25 = max(metrics.volume_atm_p25_near, vol_min)
+    volume_score = max(0.0, min(1.0, math.log(vol_p25 / vol_min) / log_vol_range))
+
+    # OI p25 score (log) — oi_min=50, oi_max=50_000 ; sentinelle hors-séance → score neutre
+    if metrics.oi_atm_p25_near >= 999_000:
+        oi_score = 0.5  # neutre quand OI indisponible
+    else:
+        oi_min, oi_max = 50.0, 50_000.0
+        log_oi_range = math.log(oi_max / oi_min)
+        oi_p25 = max(metrics.oi_atm_p25_near, oi_min)
+        oi_score = max(0.0, min(1.0, math.log(oi_p25 / oi_min) / log_oi_range))
+
+    return 0.50 * tradability + 0.25 * volume_score + 0.25 * oi_score
+
+
 def _score_density(avg_strike_count: float, weekly_count: int) -> float:
     """Composante 4 (poids 0.10) : densité strikes + weeklies."""
     strike_score = max(0.0, min(1.0, (avg_strike_count - 10) / (50 - 10)))
@@ -106,14 +194,15 @@ def compute_score(metrics: OptionsMetrics) -> float:
     Poids : IV Rank 0.30 | Term structure 0.25 | Liquidité 0.20 | Densité 0.10 | Events 0.15
     Pénalités : ex-div ×0.3 | IV Rank>70 ×0.5 | backwardation>1.15 ×0.7
     """
-    avg_volume = (metrics.avg_volume_near + metrics.avg_volume_far) / 2
-    avg_oi = (metrics.avg_oi_near + metrics.avg_oi_far) / 2
     avg_strikes = (metrics.strike_count_near + metrics.strike_count_far) / 2
 
+    # Liquidité : composante remplacée par _score_atm_quality (FEAT-023 § Étape 2).
+    # Combine spread 4 jambes (tradability), volume p25 ATM, OI p25 ATM.
+    # Fallback automatique sur _score_liquidity legacy si champs ATM non renseignés.
     raw_score = (
         config.SCREENER_SCORE_WEIGHT_IV_RANK        * _score_iv_rank(metrics.iv_rank_proxy)
         + config.SCREENER_SCORE_WEIGHT_TERM_STRUCTURE * _score_term_structure(metrics.term_structure_ratio)
-        + config.SCREENER_SCORE_WEIGHT_LIQUIDITY      * _score_liquidity(metrics.avg_bid_ask_spread_pct, avg_volume, avg_oi)
+        + config.SCREENER_SCORE_WEIGHT_LIQUIDITY      * _score_atm_quality(metrics)
         + config.SCREENER_SCORE_WEIGHT_DENSITY        * _score_density(avg_strikes, metrics.weekly_count)
         + config.SCREENER_SCORE_WEIGHT_EVENTS         * _score_events(metrics.event_score_factor)
     ) * 100

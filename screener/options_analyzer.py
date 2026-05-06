@@ -189,6 +189,127 @@ def get_atm_iv(
 _OI_UNAVAILABLE = 999_999.0  # Sentinelle OI : données absentes → filtre no_open_interest désactivé
 
 
+# ── Liquidité ATM-ciblée (FEAT-023 § Étape 2) ──────────────────────────────────
+
+
+from dataclasses import dataclass
+
+
+@dataclass
+class AtmLiquidity:
+    """
+    Métriques de liquidité concentrées sur la zone ATM ±band % du spot.
+    Calculées sur calls + puts agrégés (4 jambes touchent les deux côtés).
+    Sentinelles préservées pour compatibilité hors-séance :
+      - oi_p25, oi_median = _OI_UNAVAILABLE quand OI globalement indisponible.
+    """
+    spread_pct_median: float       # spread % du mid (médiane sur ATM band)
+    spread_dollar_median: float    # spread $ absolu (médiane)
+    volume_median: float
+    volume_p25: float
+    oi_median: float
+    oi_p25: float
+    strike_count: int              # nb strikes distincts dans la band
+    mid_price_mean: float          # mid moyen — sert à _score_tradability
+
+
+def compute_atm_liquidity(
+    calls_df,
+    puts_df,
+    spot: float,
+    atm_band_pct: float = config.SCREENER_ATM_BAND_PCT,
+) -> AtmLiquidity:
+    """
+    Calcule la liquidité concentrée sur la zone ATM ±atm_band_pct.
+
+    Concatène calls + puts (les templates 4 jambes peuvent toucher les deux).
+    Utilise la médiane et le 25e percentile : le p25 capture la jambe la plus
+    faible parmi celles qu'on pourrait choisir, ce qui est le vrai goulet
+    d'étranglement pour un combo 4 jambes.
+
+    Hors-séance (bid=ask=0 partout) :
+      - spread_pct_median = 0.0 (non pénalisé par spread_too_wide)
+      - oi_*  = _OI_UNAVAILABLE quand <5 % des options ont OI>0
+    """
+    import pandas as pd
+
+    if spot is None or spot <= 0:
+        return _empty_atm_liquidity()
+
+    frames = []
+    if calls_df is not None and isinstance(calls_df, pd.DataFrame) and not calls_df.empty:
+        frames.append(calls_df)
+    if puts_df is not None and isinstance(puts_df, pd.DataFrame) and not puts_df.empty:
+        frames.append(puts_df)
+    if not frames:
+        return _empty_atm_liquidity()
+
+    df = pd.concat(frames, ignore_index=True)
+    band = spot * atm_band_pct
+    atm_df = df[(df["strike"] >= spot - band) & (df["strike"] <= spot + band)].copy()
+    if atm_df.empty:
+        return _empty_atm_liquidity()
+
+    # Volume / OI médian + p25 sur la band
+    vol = atm_df["volume"].fillna(0).astype(float)
+    volume_median = float(vol.median())
+    volume_p25 = float(vol.quantile(0.25))
+
+    oi_series = atm_df["openInterest"].fillna(0).astype(float)
+    if len(oi_series) > 0 and (oi_series > 0).mean() >= 0.05:
+        oi_median = float(oi_series.median())
+        oi_p25 = float(oi_series.quantile(0.25))
+    else:
+        # OI globalement indisponible (hors-séance) → sentinelle pour désactiver le filtre
+        oi_median = _OI_UNAVAILABLE
+        oi_p25 = _OI_UNAVAILABLE
+
+    # Spread % et $ médian sur les options avec mid valide
+    mid = (atm_df["bid"] + atm_df["ask"]) / 2
+    valid = mid > 0
+    if not valid.any():
+        return AtmLiquidity(
+            spread_pct_median=0.0,
+            spread_dollar_median=0.0,
+            volume_median=volume_median,
+            volume_p25=volume_p25,
+            oi_median=oi_median,
+            oi_p25=oi_p25,
+            strike_count=int(atm_df["strike"].nunique()),
+            mid_price_mean=0.0,
+        )
+    valid_idx = atm_df.index[valid]
+    spread_dollar = atm_df.loc[valid_idx, "ask"] - atm_df.loc[valid_idx, "bid"]
+    spread_pct = spread_dollar / mid.loc[valid_idx]
+
+    return AtmLiquidity(
+        spread_pct_median=float(spread_pct.median()),
+        spread_dollar_median=float(spread_dollar.median()),
+        volume_median=volume_median,
+        volume_p25=volume_p25,
+        oi_median=oi_median,
+        oi_p25=oi_p25,
+        strike_count=int(atm_df["strike"].nunique()),
+        mid_price_mean=float(mid.loc[valid_idx].mean()),
+    )
+
+
+def _empty_atm_liquidity() -> AtmLiquidity:
+    return AtmLiquidity(
+        spread_pct_median=0.20,    # élevé → sera disqualifié (signal d'erreur)
+        spread_dollar_median=0.0,
+        volume_median=0.0,
+        volume_p25=0.0,
+        oi_median=0.0,
+        oi_p25=0.0,
+        strike_count=0,
+        mid_price_mean=0.0,
+    )
+
+
+# ── Liquidité chaîne (legacy — conservée pour compatibilité) ────────────────────
+
+
 def compute_chain_liquidity(
     chain_df,
     spot: float | None = None,
@@ -306,6 +427,8 @@ def analyze_ticker(
 
         near_calls = near_chain.calls
         far_calls = far_chain.calls
+        near_puts = near_chain.puts
+        far_puts = far_chain.puts
 
         # IV ATM (calls, nearest strikes) — fallback lastPrice hors-séance
         iv_near = get_atm_iv(near_calls, spot_price, expiry=near_exp, today=today)
@@ -327,12 +450,12 @@ def analyze_ticker(
         # Term structure ratio
         term_ratio = iv_far / iv_near if iv_near > 0 else 1.0
 
-        # Liquidité — spread mesuré sur ATM ±15 % (cf. BUG-028 hotfix)
-        spread_near, vol_near, oi_near = compute_chain_liquidity(near_calls, spot=spot_price)
-        spread_far, vol_far, oi_far = compute_chain_liquidity(far_calls, spot=spot_price)
-        avg_spread = (spread_near + spread_far) / 2
+        # Liquidité ATM-ciblée (FEAT-023 § Étape 2) — calls + puts agrégés
+        atm_near = compute_atm_liquidity(near_calls, near_puts, spot_price)
+        atm_far = compute_atm_liquidity(far_calls, far_puts, spot_price)
+        avg_spread = (atm_near.spread_pct_median + atm_far.spread_pct_median) / 2
 
-        # Densité strikes
+        # Densité strikes (chaîne entière, indicateur secondaire)
         strike_count_near = len(near_calls["strike"].unique()) if not near_calls.empty else 0
         strike_count_far = len(far_calls["strike"].unique()) if not far_calls.empty else 0
         weekly_cnt = count_weeklies(expirations, near_range, today)
@@ -348,11 +471,12 @@ def analyze_ticker(
             hv30=hv30,
             iv_rank_proxy=iv_rank,
             term_structure_ratio=term_ratio,
+            # Legacy (alimentés par les valeurs ATM pour rétrocompat ScreenerResult)
             avg_bid_ask_spread_pct=avg_spread,
-            avg_volume_near=vol_near,
-            avg_volume_far=vol_far,
-            avg_oi_near=oi_near,
-            avg_oi_far=oi_far,
+            avg_volume_near=atm_near.volume_median,
+            avg_volume_far=atm_far.volume_median,
+            avg_oi_near=atm_near.oi_median,
+            avg_oi_far=atm_far.oi_median,
             strike_count_near=strike_count_near,
             strike_count_far=strike_count_far,
             weekly_count=weekly_cnt,
@@ -363,6 +487,23 @@ def analyze_ticker(
             event_score_factor=event_info["event_score_factor"],
             next_earnings_date=next_earnings_date,
             next_ex_div_date=next_ex_div_date,
+            # FEAT-023 Étape 2 — métriques ATM-ciblées
+            spread_pct_atm_near=atm_near.spread_pct_median,
+            spread_pct_atm_far=atm_far.spread_pct_median,
+            spread_dollar_atm_near=atm_near.spread_dollar_median,
+            spread_dollar_atm_far=atm_far.spread_dollar_median,
+            volume_atm_median_near=atm_near.volume_median,
+            volume_atm_median_far=atm_far.volume_median,
+            volume_atm_p25_near=atm_near.volume_p25,
+            volume_atm_p25_far=atm_far.volume_p25,
+            oi_atm_median_near=atm_near.oi_median,
+            oi_atm_median_far=atm_far.oi_median,
+            oi_atm_p25_near=atm_near.oi_p25,
+            oi_atm_p25_far=atm_far.oi_p25,
+            strike_count_atm_near=atm_near.strike_count,
+            strike_count_atm_far=atm_far.strike_count,
+            mid_price_atm_near=atm_near.mid_price_mean,
+            mid_price_atm_far=atm_far.mid_price_mean,
         )
 
     except Exception as exc:

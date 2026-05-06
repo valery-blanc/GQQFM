@@ -1360,21 +1360,40 @@ event_score_factor :
 |---|-----------|-------|---------|
 | 1 | IV Rank proxy | 0.30 | `1.0 - abs(iv_rank - 45) / 55` |
 | 2 | Term structure | 0.25 | 1.0 si ratio ≤ 1.00, décroît → 0 à 1.30 |
-| 3 | Liquidité | 0.20 | `0.4×spread + 0.3×log(vol) + 0.3×log(OI)` |
+| 3 | Qualité ATM (FEAT-023) | 0.20 | `0.5×tradabilité + 0.25×log(vol_p25) + 0.25×log(oi_p25)` |
 | 4 | Densité | 0.10 | `0.7×strike_score + 0.3×weekly_score` |
 | 5 | Événements | 0.15 | `clip((factor - 0.5) / 1.0, 0, 1)` |
+
+**Tradabilité** (FEAT-023 § Étape 2) : `cost_pct = 4 × spread%_ATM_moyen`,
+score = 1.0 si `cost_pct ≤ 5 %`, décroît linéairement → 0 à 30 %. Mesure le
+frottement de l'aller-retour 4 jambes en % du prix.
+
+**Liquidité ATM-ciblée** : tous les filtres et scores liquidité utilisent les
+métriques calculées sur la zone **ATM ±10 %** (calls + puts agrégés), pas sur
+la chaîne entière diluée par les wings OTM. Fields :
+- `spread_pct_atm_near/far`, `spread_dollar_atm_near/far`
+- `volume_atm_median_near/far`, `volume_atm_p25_near/far` (p25 = jambe la plus faible)
+- `oi_atm_median_near/far`, `oi_atm_p25_near/far`
+- `strike_count_atm_near/far`
 
 **IV Rank proxy :** `clip((iv_atm_near / hv30 - 0.6) / 1.2 × 100, 0, 100)`
 **Term structure ratio :** `iv_atm_far / iv_atm_near`
 **Pénalités :** ×0.3 ex-div, ×0.5 IV Rank>70, ×0.7 backwardation>1.15,
 ×0.6 macro CRITICAL en danger zone (FOMC/NFP/CPI — BUG-028).
 
-**Filtres éliminatoires :** spread>10%, volume<100, OI<500 (si données dispo),
-strikes<10, IV=0, CRITICAL **MICRO** en danger zone (earnings/ex-div/FDA).
+**Filtres éliminatoires (FEAT-023 § Étape 2)** :
+- `spread_too_wide` : `max(spread%_ATM_near, spread%_ATM_far) > 12 %`
+- `no_volume_atm` : `volume_p25_ATM_near < 20` (skip hors-séance via median=0)
+- `no_oi_atm` : `oi_p25_ATM_near < 50` (skip via sentinelle 999_999 hors-séance)
+- `not_enough_strikes_atm` : `min(strike_count_ATM) < 4`
+- `not_enough_strikes` (legacy) : strikes chaîne entière < 10
+- `iv_data_missing` : IV=0
+- `critical_event_in_near` : CRITICAL **MICRO** uniquement (earnings/ex-div/FDA)
+
 Les événements CRITICAL **MACRO** (FOMC, NFP, CPI) ne disqualifient pas — ils
 affectent tout le marché de façon corrélée et seraient sinon un *kill switch*
 qui vide l'univers à chaque jour FOMC (BUG-028). Ils sont gérés par pénalité
-score uniquement.
+score uniquement (×0.6).
 
 **Garantie top_n (BUG-027) :** si les qualifiés sont moins que `top_n`, le screener
 complète avec les meilleurs tickers disqualifiés (triés par score). Ces tickers de

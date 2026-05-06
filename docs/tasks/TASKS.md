@@ -470,14 +470,15 @@
 ### Étape 1 — Fix BUG-028 (cf. ci-dessus)
 
 ### Étape 2 — Liquidité ATM-ciblée
-- [ ] screener/options_analyzer.py — `compute_atm_liquidity` (zone ATM ±10%)
-- [ ] screener/options_analyzer.py — `analyze_ticker` mesure calls + puts
-- [ ] screener/models.py — nouveaux champs OptionsMetrics ATM
-- [ ] screener/scorer.py — règles éliminatoires recalibrées
-- [ ] screener/scorer.py — `_score_tradability`
-- [ ] config.py — nouveaux seuils SCREENER_*_ATM
-- [ ] tests/test_screener_filters.py — tests ATM
-- [ ] Test ANQA — SPY/QQQ/AAPL passent sans fallback
+- [x] screener/options_analyzer.py — `compute_atm_liquidity` (zone ATM ±10%, calls+puts)
+- [x] screener/options_analyzer.py — `analyze_ticker` mesure calls + puts
+- [x] screener/models.py — nouveaux champs OptionsMetrics ATM (defaults pour rétrocompat)
+- [x] screener/scorer.py — règles éliminatoires recalibrées (spread/vol/oi/strikes ATM)
+- [x] screener/scorer.py — `_score_tradability` + `_score_atm_quality`
+- [x] config.py — SCREENER_ATM_BAND_PCT, MAX_SPREAD_PCT_ATM, MIN_VOLUME_P25_ATM, etc.
+- [x] tests/test_screener_filters.py — tests ATM (compute_atm_liquidity, tradability, filtres)
+- [x] docs/specs/option_scanner_spec_v2.md — §14.4 mis à jour
+- [ ] Test ANQA — top reflète qualité ATM (SPY/QQQ devraient remonter)
 - [ ] Commit
 
 ### Étape 3 — Scoring multi-stratégie + behavior

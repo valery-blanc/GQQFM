@@ -51,6 +51,27 @@ class OptionsMetrics:
     next_earnings_date: date | None = None
     next_ex_div_date: date | None = None
 
+    # ── Liquidité ATM ciblée (FEAT-023 § Étape 2) ────────────────────────────
+    # Mesurée sur calls + puts dans la zone ATM ±SCREENER_ATM_BAND_PCT (10 %).
+    # Représente ce que les templates 4 jambes utilisent réellement.
+    # Valeurs par défaut = neutres pour ne pas casser les anciens tests.
+    spread_pct_atm_near: float = 0.0       # spread % médian ATM near (calls+puts)
+    spread_pct_atm_far: float = 0.0        # spread % médian ATM far
+    spread_dollar_atm_near: float = 0.0    # spread $ médian ATM near
+    spread_dollar_atm_far: float = 0.0     # spread $ médian ATM far
+    volume_atm_median_near: float = 0.0    # volume médian sur ATM near
+    volume_atm_median_far: float = 0.0
+    volume_atm_p25_near: float = 0.0       # 25e percentile = jambe la plus faible
+    volume_atm_p25_far: float = 0.0
+    oi_atm_median_near: float = 0.0
+    oi_atm_median_far: float = 0.0
+    oi_atm_p25_near: float = 0.0
+    oi_atm_p25_far: float = 0.0
+    strike_count_atm_near: int = 0         # nb strikes distincts dans ATM±band
+    strike_count_atm_far: int = 0
+    mid_price_atm_near: float = 0.0        # mid moyen ATM (sert au score tradabilité)
+    mid_price_atm_far: float = 0.0
+
     # Qualification
     disqualification_reason: str | None = None
 

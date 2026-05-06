@@ -15,24 +15,72 @@ import pytest
 from events.calendar import EventCalendar
 from events.models import EventImpact, EventScope, MarketEvent
 from screener.event_filter import filter_by_events
-from screener.options_analyzer import select_expirations
+from screener.options_analyzer import compute_atm_liquidity, select_expirations
 from screener.scorer import check_disqualification
 from screener.models import OptionsMetrics
 
 
-# ── T6 : Spread ──────────────────────────────────────────────────────────────
+# ── T6 : Spread ATM-ciblé (FEAT-023 § Étape 2) ──────────────────────────────
 
-def test_spread_disqualified():
-    """T6 : spread > 10% → disqualifié."""
-    metrics = _make_metrics(avg_bid_ask_spread_pct=0.15)
+def test_spread_disqualified_atm():
+    """spread ATM > 12% → disqualifié."""
+    metrics = _make_metrics(spread_pct_atm_near=0.15, spread_pct_atm_far=0.10)
     assert check_disqualification(metrics) == "spread_too_wide"
 
 
-def test_spread_qualified():
-    """T6 : spread = 5% → qualifié (si autres critères OK)."""
-    metrics = _make_metrics(avg_bid_ask_spread_pct=0.05)
+def test_spread_qualified_atm():
+    """spread ATM = 5% → qualifié sur ce critère."""
+    metrics = _make_metrics(spread_pct_atm_near=0.05, spread_pct_atm_far=0.04)
     reason = check_disqualification(metrics)
-    assert reason not in (None, "spread_too_wide") or reason is None
+    assert reason != "spread_too_wide"
+
+
+def test_spread_legacy_fallback():
+    """Si champs ATM non renseignés, fallback sur avg_bid_ask_spread_pct legacy."""
+    metrics = _make_metrics(
+        spread_pct_atm_near=0.0,
+        spread_pct_atm_far=0.0,
+        avg_bid_ask_spread_pct=0.15,
+    )
+    assert check_disqualification(metrics) == "spread_too_wide"
+
+
+def test_volume_p25_atm_disqualifies():
+    """Volume p25 ATM near < 20 → disqualifié si volume_median > 0 (en séance)."""
+    metrics = _make_metrics(
+        volume_atm_median_near=500.0,  # > 0 → la règle s'active
+        volume_atm_p25_near=10.0,      # < 20 → fail
+    )
+    assert check_disqualification(metrics) == "no_volume_atm"
+
+
+def test_volume_p25_atm_off_hours_skipped():
+    """Hors-séance (volume_median=0), la règle no_volume_atm est skip."""
+    metrics = _make_metrics(
+        volume_atm_median_near=0.0,
+        volume_atm_p25_near=0.0,
+    )
+    reason = check_disqualification(metrics)
+    assert reason != "no_volume_atm"
+
+
+def test_oi_p25_atm_sentinel_skipped():
+    """Sentinelle OI_UNAVAILABLE (999_999) → règle no_oi_atm désactivée."""
+    metrics = _make_metrics(
+        oi_atm_p25_near=999_999.0,
+        oi_atm_p25_far=999_999.0,
+    )
+    reason = check_disqualification(metrics)
+    assert reason != "no_oi_atm"
+
+
+def test_strikes_atm_too_few():
+    """< 4 strikes dans la zone ATM ±band → disqualifié."""
+    metrics = _make_metrics(
+        strike_count_atm_near=3,
+        strike_count_atm_far=8,
+    )
+    assert check_disqualification(metrics) == "not_enough_strikes_atm"
 
 
 # ── T7 : Earnings dans la fenêtre ────────────────────────────────────────────
@@ -74,8 +122,8 @@ def test_etf_always_passes():
 
 # ── T8 : CRITICAL event en near zone ─────────────────────────────────────────
 
-def test_critical_event_near_disqualified():
-    """T8 : FOMC dans 5 jours → disqualifié si dans la danger zone."""
+def test_critical_macro_event_does_not_disqualify():
+    """BUG-028 : FOMC (MACRO CRITICAL) ne disqualifie pas — pénalité score uniquement."""
     fomc = MarketEvent(
         date=date.today() + timedelta(days=5),
         name="FOMC",
@@ -83,6 +131,19 @@ def test_critical_event_near_disqualified():
         scope=EventScope.MACRO,
     )
     metrics = _make_metrics(events_in_danger_zone=[fomc])
+    assert check_disqualification(metrics) is None
+
+
+def test_critical_micro_event_disqualifies():
+    """BUG-028 : event MICRO CRITICAL (FDA) en danger zone → disqualifié."""
+    fda = MarketEvent(
+        date=date.today() + timedelta(days=5),
+        name="FDA",
+        impact=EventImpact.CRITICAL,
+        scope=EventScope.MICRO,
+        symbol="TEST",
+    )
+    metrics = _make_metrics(events_in_danger_zone=[fda])
     assert check_disqualification(metrics) == "critical_event_in_near"
 
 
@@ -188,6 +249,124 @@ def test_select_expirations_no_valid_pair():
 
     assert near_exp is None
     assert far_exp is None
+
+
+# ── compute_atm_liquidity (FEAT-023 § Étape 2) ───────────────────────────────
+
+def _make_chain(strikes_volumes_oi_spread: list[tuple]) -> pd.DataFrame:
+    """Helper : construit une chaîne mock à partir de tuples (strike, vol, oi, spread_$, mid_price)."""
+    rows = []
+    for strike, vol, oi, spread, mid in strikes_volumes_oi_spread:
+        rows.append({
+            "strike": strike,
+            "volume": vol,
+            "openInterest": oi,
+            "bid": max(mid - spread / 2, 0.01),
+            "ask": mid + spread / 2,
+        })
+    return pd.DataFrame(rows)
+
+
+def test_atm_liquidity_excludes_otm_wings():
+    """
+    Chaîne avec ATM (95-105) liquide + wings (50-90, 110-150) illiquides.
+    compute_atm_liquidity doit ignorer les wings et retourner les stats ATM.
+    """
+    spot = 100.0
+    # ATM (95, 100, 105) : volume élevé, spread serré
+    # Wings (60, 80, 120, 140) : volume nul, spread énorme en %
+    rows = [
+        (60, 0, 0, 0.50, 0.10),
+        (80, 0, 0, 0.20, 0.30),
+        (95, 1000, 5000, 0.05, 5.00),
+        (100, 2000, 10000, 0.05, 4.00),
+        (105, 800, 4000, 0.05, 3.50),
+        (120, 0, 0, 0.30, 0.20),
+        (140, 0, 0, 0.50, 0.05),
+    ]
+    chain = _make_chain(rows)
+    atm = compute_atm_liquidity(chain, None, spot=spot, atm_band_pct=0.10)
+
+    assert atm.strike_count == 3
+    # Volume médian ATM ≈ 1000, p25 ≥ 800 (les 3 strikes 800/1000/2000)
+    assert atm.volume_median == pytest.approx(1000.0)
+    assert atm.volume_p25 >= 800.0
+    # Spread % ATM faible : 0.05 / ~4 ≈ 1.25 %, médiane sur 3 valeurs
+    assert atm.spread_pct_median < 0.05
+
+
+def test_atm_liquidity_calls_and_puts_combined():
+    """
+    Calls et puts sont concaténés. Un strike commun apparaît 2 fois → poids
+    accru légitime (les deux côtés sont disponibles).
+    """
+    spot = 100.0
+    calls = _make_chain([(95, 100, 500, 0.10, 3.0), (100, 200, 800, 0.10, 2.0)])
+    puts = _make_chain([(95, 150, 600, 0.10, 1.5), (100, 250, 900, 0.10, 2.5)])
+    atm = compute_atm_liquidity(calls, puts, spot=spot, atm_band_pct=0.10)
+
+    # 2 strikes distincts, 4 lignes au total
+    assert atm.strike_count == 2
+    # Médiane des 4 volumes : (100, 150, 200, 250) → médiane = 175
+    assert atm.volume_median == pytest.approx(175.0)
+
+
+def test_atm_liquidity_p25_detects_weak_leg():
+    """4 strikes ATM dont 1 à volume très faible → p25 capture la jambe faible."""
+    spot = 100.0
+    rows = [
+        (95, 5, 100, 0.10, 3.0),     # jambe faible !
+        (98, 500, 2000, 0.05, 2.5),
+        (102, 400, 1800, 0.05, 2.4),
+        (105, 600, 2200, 0.05, 2.0),
+    ]
+    chain = _make_chain(rows)
+    atm = compute_atm_liquidity(chain, None, spot=spot, atm_band_pct=0.10)
+    # p25 (25e percentile) sur (5, 400, 500, 600) ≤ ~100 → < 20 disqualifie
+    assert atm.volume_p25 < 200.0
+
+
+def test_atm_liquidity_off_hours_oi_sentinel():
+    """OI globalement à 0 (hors-séance) → sentinelle 999_999 sur p25 et median."""
+    spot = 100.0
+    rows = [(s, 0, 0, 0.05, 3.0) for s in (95, 100, 105)]
+    chain = _make_chain(rows)
+    atm = compute_atm_liquidity(chain, None, spot=spot, atm_band_pct=0.10)
+    assert atm.oi_p25 >= 999_000
+    assert atm.oi_median >= 999_000
+
+
+def test_atm_liquidity_empty_atm_band():
+    """Aucun strike dans la band → liquidité 'vide' (spread élevé pour disqualifier)."""
+    spot = 100.0
+    # Tous les strikes sont OTM extrêmes
+    chain = _make_chain([(50, 100, 500, 0.05, 0.5), (200, 100, 500, 0.05, 0.1)])
+    atm = compute_atm_liquidity(chain, None, spot=spot, atm_band_pct=0.10)
+    assert atm.strike_count == 0
+    assert atm.spread_pct_median == pytest.approx(0.20)
+
+
+# ── _score_tradability ────────────────────────────────────────────────────────
+
+def test_tradability_score_penalizes_wide_spread():
+    """Spread ATM 15 % moyen → cost 4×15%=60% → score = 0."""
+    from screener.scorer import _score_tradability
+    metrics = _make_metrics(spread_pct_atm_near=0.15, spread_pct_atm_far=0.15)
+    assert _score_tradability(metrics) == pytest.approx(0.0)
+
+
+def test_tradability_score_rewards_tight_spread():
+    """Spread ATM 1 % → cost 4 % → score = 1.0."""
+    from screener.scorer import _score_tradability
+    metrics = _make_metrics(spread_pct_atm_near=0.01, spread_pct_atm_far=0.01)
+    assert _score_tradability(metrics) == pytest.approx(1.0)
+
+
+def test_tradability_score_legacy_neutral():
+    """Champs ATM non renseignés → score neutre 0.5."""
+    from screener.scorer import _score_tradability
+    metrics = _make_metrics(spread_pct_atm_near=0.0, spread_pct_atm_far=0.0)
+    assert _score_tradability(metrics) == pytest.approx(0.5)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────

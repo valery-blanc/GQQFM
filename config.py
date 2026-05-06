@@ -61,6 +61,15 @@ SCREENER_PENALTY_HIGH_IV_RANK: float = 0.5
 SCREENER_PENALTY_BACKWARDATION: float = 0.7
 SCREENER_PENALTY_MACRO_CRITICAL: float = 0.6  # FOMC/NFP/CPI en danger zone (BUG-028)
 
+# ── Liquidité ATM-ciblée (FEAT-023 § Étape 2) ──────────────────────────────────
+# Mesure la liquidité sur les strikes effectivement utilisés par les templates
+# 4 jambes (zone ATM ±band) au lieu de la chaîne entière diluée par les wings.
+SCREENER_ATM_BAND_PCT: float = 0.10        # ±10 % du spot pour mesurer liquidité
+SCREENER_MAX_SPREAD_PCT_ATM: float = 0.12  # 12 % spread max sur ATM (max(near,far))
+SCREENER_MIN_VOLUME_P25_ATM: int = 20      # volume 25e perc. min sur ATM near
+SCREENER_MIN_OI_P25_ATM: int = 50          # OI 25e perc. min sur ATM near
+SCREENER_MIN_STRIKES_ATM: int = 4          # strikes mini dans ATM ±band
+
 # ── Scanner expiry ranges (sélection de paires événementielles) ──
 # Defaults durcis (FEAT-011) : la fenêtre 14-35 j sur le short évite le gamma
 # cliff de la dernière semaine et reste dans la sweet zone théta des calendars.
