@@ -556,7 +556,7 @@ def render_backtest_page(base_params: dict) -> None:
 
     st.markdown("---")
 
-    from ui.page_live import _render_grid
+    from ui.page_live import _render_grid, _render_grid_details_compact
 
     if "view_mode_bt" not in st.session_state:
         st.session_state["view_mode_bt"] = "Grille"
@@ -568,8 +568,12 @@ def render_backtest_page(base_params: dict) -> None:
 
     st.markdown("---")
 
+    dbc_bt = results.get("days_before_close", params.get("days_before_close", 3))
     if view_mode == "Grille":
         _render_grid(results, "bt", params)
+        st.markdown("---")
+        _render_grid_details_compact(results, "bt_selected_idx",
+                                     days_before_close=dbc_bt, as_of=as_of)
         return
 
     # ── Vue unique ─────────────────────────────────────────────────────────

@@ -237,14 +237,6 @@ def plot_pnl_mini(
         showlegend=False, hoverinfo="skip",
     ))
 
-    # Dense invisible markers — required for on_select click detection in Streamlit.
-    fig.add_trace(go.Scatter(
-        x=spot_range, y=pnl_pct,
-        mode="markers",
-        marker=dict(size=20, opacity=0),
-        showlegend=False, hoverinfo="skip",
-    ))
-
     fig.add_vline(x=current_spot, line=dict(color="white", dash="dash", width=1))
     fig.add_hline(y=0, line=dict(color="gray", dash="dot", width=0.5))
 
@@ -265,8 +257,6 @@ def plot_pnl_mini(
         xaxis=dict(showticklabels=False, showgrid=False),
         yaxis=dict(ticksuffix="%", tickfont=dict(size=7), showgrid=True),
         showlegend=False,
-        dragmode="select",
-        clickmode="event+select",
     )
 
     return fig

@@ -302,7 +302,6 @@ def _render_grid(results: dict, tab_suffix: str, params: dict) -> None:
     symbols_list = results.get("symbols") or [None] * n_total
 
     current_selected = st.session_state.get(selected_key, 0)
-    click_detected: int | None = None
 
     for row in range(_GRID_ROWS):
         cols = st.columns(_GRID_COLS)
@@ -325,26 +324,47 @@ def _render_grid(results: dict, tab_suffix: str, params: dict) -> None:
                     title=title_std,
                 )
 
-                chart_key = f"mini_{tab_suffix}_{combo_idx}"
-
                 with st.container(border=is_selected):
-                    event = st.plotly_chart(
+                    st.plotly_chart(
                         fig, use_container_width=True,
-                        on_select="rerun", key=chart_key,
                         config={"displayModeBar": False},
+                        key=f"mini_{tab_suffix}_{combo_idx}",
                     )
-                    st.caption(
-                        f"**#{combo_idx+1}** — {m['score']:.2f} | "
-                        f"±1σ ${m['max_gain_real_dollar']:+.0f}"
+                    btn_label = (
+                        f"{'▶ ' if is_selected else ''}#{combo_idx+1} · "
+                        f"{m['score']:.2f} · ±1σ ${m['max_gain_real_dollar']:+.0f}"
                     )
+                    if st.button(btn_label, key=f"sel_{tab_suffix}_{combo_idx}",
+                                 use_container_width=True,
+                                 type="primary" if is_selected else "secondary"):
+                        st.session_state[selected_key] = combo_idx
+                        st.rerun()
 
-                # Only process click if this chart is NOT already selected (avoids loop).
-                if event.selection.points and combo_idx != current_selected:
-                    click_detected = combo_idx
 
-    if click_detected is not None:
-        st.session_state[selected_key] = click_detected
-        st.rerun()
+def _render_grid_details_compact(results: dict, selected_idx_key: str,
+                                 days_before_close: int, as_of=None) -> None:
+    """Détails du combo sélectionné sans le grand graphe P&L — utilisé sous la grille."""
+    idx = st.session_state.get(selected_idx_key, 0)
+    idx = min(idx, results["n_found"] - 1)
+    combo = results["combinations"][idx]
+    m = results["metrics"][idx]
+    pnl_for_combo = results["pnl_per_combo"][idx]
+
+    symbols_list = results.get("symbols")
+    combo_symbol = symbols_list[idx] if symbols_list else results.get("symbol")
+
+    title_std = _combo_title_std(combo, combo_symbol)
+    st.code(title_std, language=None)
+
+    render_combo_detail(
+        combo, m,
+        symbol=combo_symbol,
+        pnl_tensor=pnl_for_combo,
+        spot_range=results["spot_ranges"][idx],
+        current_spot=results["spots"][idx],
+        days_before_close=days_before_close,
+        **({"as_of": as_of} if as_of is not None else {}),
+    )
 
 
 def _render_grid_details(results: dict, selected_idx_key: str,
@@ -571,5 +591,7 @@ def render_live_page(base_params: dict) -> None:
 
     if view_mode == "Grille":
         _render_grid(results, "live", params)
+        st.markdown("---")
+        _render_grid_details_compact(results, "live_selected_idx", days_before_close=dbc)
     else:
         _render_single(results, "live_selected_idx", params, days_before_close=dbc)
