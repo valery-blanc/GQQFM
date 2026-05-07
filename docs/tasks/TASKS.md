@@ -488,8 +488,12 @@
 - [x] screener/screener.py — _compute_iv_rank avec fallback HV-based si Polygon indisponible
 - [x] tests/test_iv_rank_polygon.py
 - [x] BUG-030 FIXED : yfinance dans workers → blocage → RFR live unique + max_workers 20
-- [ ] Test ANQA — premier run amorce le cache, classements meilleurs
-- [ ] Commit
+- [x] Fix yield cache : try 3 strikes × ±2j adjacents → 2% → ~15% de succès
+- [x] Per-ticker HV fallback dans screener.py (< 10 pts Polygon → HV-based)
+- [x] min_points 20→10 dans compute_iv_rank_from_history
+- [x] Cache stale (91 lignes) purgé sur ANQA pour refetch propre
+- [ ] Test ANQA — 2e run : IV Rank différenciés, SPY/QQQ classés correctement
+- [ ] Commit final
 
 ## BUG-029 — Rebalancing weights + RIC IV Rank penalty
 

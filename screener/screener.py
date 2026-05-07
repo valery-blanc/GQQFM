@@ -226,17 +226,34 @@ class UnderlyingScreener:
     ) -> dict[str, float]:
         """
         IV Rank 52w. Préfère Polygon (FEAT-024 — vrai rank historique),
-        retombe sur l'approximation HV-based (FEAT-023) en cas d'indisponibilité.
+        retombe sur l'approximation HV-based (FEAT-023) par ticker quand
+        l'historique Polygon est insuffisant (< 10 points).
         """
         try:
             from data.provider_polygon import PolygonHistoricalProvider, resolve_polygon_key
+            from screener.iv_rank_polygon import fetch_or_load_iv_history, compute_iv_rank_from_history
             if resolve_polygon_key():
                 polygon = PolygonHistoricalProvider()
                 logger.info("IV Rank : utilise Polygon (vrai rank historique)")
-                return batch_compute_iv_rank_polygon(
-                    symbols, iv_map, polygon,
-                    progress_callback=progress_callback,
+                history = fetch_or_load_iv_history(
+                    symbols, polygon, progress_callback=progress_callback
                 )
+                # Fallback HV-based pour les tickers avec historique insuffisant
+                hv_ranks = batch_compute_iv_rank_52w(symbols, iv_map, hv_map)
+                result: dict[str, float] = {}
+                poly_count, hv_count = 0, 0
+                for sym in symbols:
+                    h = history.get(sym, [])
+                    if len(h) >= 10:
+                        result[sym] = compute_iv_rank_from_history(h, iv_map.get(sym, 0.0), min_points=10)
+                        poly_count += 1
+                    else:
+                        result[sym] = hv_ranks.get(sym, 50.0)
+                        hv_count += 1
+                logger.info(
+                    "IV Rank : %d via Polygon, %d via HV fallback", poly_count, hv_count
+                )
+                return result
         except Exception as exc:
             logger.warning("IV Rank Polygon indisponible (%s) — fallback HV-based", exc)
         return batch_compute_iv_rank_52w(symbols, iv_map, hv_map)

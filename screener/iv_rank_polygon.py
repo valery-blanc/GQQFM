@@ -118,38 +118,47 @@ def _fetch_iv_atm_at_date(
         if not calls:
             return None
 
-        # ATM strike (le plus proche du spot)
+        # ATM strike (le plus proche du spot) — essayer les 3 strikes les plus proches
         calls_with_strike = [(c, abs(float(c.get("strike_price", 0)) - spot)) for c in calls]
         calls_with_strike.sort(key=lambda x: x[1])
-        atm_call, _ = calls_with_strike[0]
-        strike = float(atm_call["strike_price"])
-        contract_ticker = atm_call["ticker"]
-        expiry = date.fromisoformat(atm_call["expiration_date"])
-        dte = (expiry - sample_date).days
 
-        # Close du contrat ATM
-        bar = polygon.get_contract_close(contract_ticker, sample_date)
-        if bar is None:
-            return None
-        price, _ = bar
-        if price <= 0:
-            return None
-
-        # RFR passé en paramètre pour éviter tout appel yfinance dans les threads
         rate = rfr if rfr is not None else config.DEFAULT_RISK_FREE_RATE
-        tte = max(dte / 365.0, 1 / 365.0)
-        iv = _implied_vol("call", price, spot, strike, tte, rate)
-        if iv <= 0.01 or iv > 3.0:
-            return None
+        found: dict | None = None
 
-        return {
-            "symbol": symbol,
-            "sample_date": sample_date,
-            "iv_atm": iv,
-            "dte": dte,
-            "strike": strike,
-            "contract_ticker": contract_ticker,
-        }
+        for atm_call, _ in calls_with_strike[:3]:
+            strike = float(atm_call["strike_price"])
+            contract_ticker = atm_call["ticker"]
+            expiry = date.fromisoformat(atm_call["expiration_date"])
+            dte = (expiry - sample_date).days
+
+            # Essayer sample_date et les jours ouvrés adjacents : les options
+            # ne tradent pas tous les jours, une barre ±1j est valide pour IV Rank.
+            for delta in [0, -1, 1, -2, 2]:
+                check_date = sample_date + timedelta(days=delta)
+                if check_date.weekday() >= 5:   # skip week-end
+                    continue
+                bar = polygon.get_contract_close(contract_ticker, check_date)
+                if bar is None:
+                    continue
+                price, _ = bar
+                if price <= 0:
+                    continue
+                tte = max(dte / 365.0, 1 / 365.0)
+                iv = _implied_vol("call", price, spot, strike, tte, rate)
+                if 0.01 < iv < 3.0:
+                    found = {
+                        "symbol": symbol,
+                        "sample_date": sample_date,
+                        "iv_atm": iv,
+                        "dte": dte,
+                        "strike": strike,
+                        "contract_ticker": contract_ticker,
+                    }
+                    break
+            if found:
+                break
+
+        return found
     except Exception as exc:
         logger.debug("IV history %s @ %s : %s", symbol, sample_date, exc)
         return None
@@ -265,7 +274,7 @@ def fetch_or_load_iv_history(
 def compute_iv_rank_from_history(
     iv_history: list[tuple[date, float]],
     current_iv: float,
-    min_points: int = 20,
+    min_points: int = 10,
 ) -> float:
     """IV Rank = position de current_iv dans [min_history, max_history]."""
     if len(iv_history) < min_points or current_iv <= 0:
