@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time as _time
+from concurrent.futures import ThreadPoolExecutor, wait as _wait, FIRST_COMPLETED
 from datetime import date, timedelta
 from typing import Iterable
 
@@ -206,8 +207,14 @@ def fetch_or_load_iv_history(
             logger.debug("IV Rank : RFR live indisponible, fallback %.3f", shared_rfr)
 
     if total > 0:
-        with ThreadPoolExecutor(max_workers=20) as executor:
-            futures = {
+        # Utilise wait() au lieu de as_completed() pour détecter les workers bloqués.
+        # Sur Windows, requests.get(timeout=X) ne se déclenche pas fiablement sur
+        # les connexions TCP half-open → as_completed() se bloque indéfiniment.
+        # Si aucun futur ne complète en 15s, on abandonne les workers restants
+        # (BUG-030 quater) et on continue avec les données déjà cachées.
+        executor = ThreadPoolExecutor(max_workers=20)
+        try:
+            fut_map = {
                 executor.submit(
                     _fetch_iv_atm_at_date, sym, d, polygon, target_dte, 7, shared_rfr,
                 ): (sym, d)
@@ -215,26 +222,45 @@ def fetch_or_load_iv_history(
             }
             # Sauvegarde tous les 100 points pour ne pas perdre le cache si interruption
             save_threshold = 100
-            for future in as_completed(futures):
-                sym, d = futures[future]
-                fetched_count += 1
-                try:
-                    row = future.result()
-                    if row is not None:
-                        new_rows.append(row)
-                except Exception as exc:
-                    logger.debug("IV history future %s @ %s : %s", sym, d, exc)
-                if progress_callback:
-                    pct = fetched_count / total
-                    progress_callback(pct, f"IV history {fetched_count}/{total}")
-                # Checkpoint périodique
-                if len(new_rows) >= save_threshold:
-                    cache_to_save = pd.concat(
-                        [cache, pd.DataFrame(new_rows)], ignore_index=True
-                    ).drop_duplicates(subset=["symbol", "sample_date"], keep="last")
-                    _save_cache(cache_to_save)
-                    cache = cache_to_save
-                    new_rows = []
+            pending = set(fut_map)
+            last_progress_ts = _time.monotonic()
+
+            while pending:
+                done, pending = _wait(pending, timeout=15, return_when=FIRST_COMPLETED)
+
+                if not done:
+                    # Aucun résultat en 15s → au moins un worker bloqué
+                    idle_s = _time.monotonic() - last_progress_ts
+                    logger.warning(
+                        "IV history : aucun résultat depuis %.0fs — "
+                        "%d futurs abandonnés (TCP half-open Windows)",
+                        idle_s, len(pending),
+                    )
+                    break
+
+                last_progress_ts = _time.monotonic()
+                for future in done:
+                    sym, d = fut_map[future]
+                    fetched_count += 1
+                    try:
+                        row = future.result()
+                        if row is not None:
+                            new_rows.append(row)
+                    except Exception as exc:
+                        logger.debug("IV history future %s @ %s : %s", sym, d, exc)
+                    if progress_callback:
+                        pct = fetched_count / total
+                        progress_callback(pct, f"IV history {fetched_count}/{total}")
+                    # Checkpoint périodique
+                    if len(new_rows) >= save_threshold:
+                        cache_to_save = pd.concat(
+                            [cache, pd.DataFrame(new_rows)], ignore_index=True
+                        ).drop_duplicates(subset=["symbol", "sample_date"], keep="last")
+                        _save_cache(cache_to_save)
+                        cache = cache_to_save
+                        new_rows = []
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     # Mise à jour cache
     if new_rows:

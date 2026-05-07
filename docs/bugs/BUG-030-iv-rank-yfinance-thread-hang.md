@@ -53,3 +53,47 @@ Utiliser un taux constant pour toutes les dates est acceptable pour ce calcul.
 ## Fichiers modifiés
 
 - `screener/iv_rank_polygon.py` — fix yfinance + max_workers
+
+---
+
+## BUG-030 bis — Explosion HTTP (retry dates adjacentes)
+
+**Symptôme** : bloqué à "IV history 22/4316" au 2e lancement.
+
+**Cause** : retry `for delta in [0, -1, 1, -2, 2]` × 3 strikes = 15 appels/paire.
+Sur le 2e run, `delta=0` → hit SQLite, mais `-1, +1, -2, +2` → 52 000 nouveaux appels HTTP.
+Avec `timeout=60`, workers bloqués.
+
+**Correction** : suppression des retries sur dates adjacentes. Seuls 3 strikes ATM
+sur la date exacte sont tentés (≤3 appels/paire).
+
+---
+
+## BUG-030 ter — `requests.get(timeout=60)` non fiable sur Windows TCP half-open
+
+**Symptôme** : bloqué à "IV history 1707/4316" (après les fixes précédents).
+
+**Cause** : `requests.get(timeout=60)` ne lève pas `Timeout` sur Windows pour les
+connexions TCP half-open (SYN envoyé, ACK jamais reçu). Le socket reste bloqué
+indéfiniment.
+
+**Correction** : `PolygonHistoricalProvider(default_timeout=10)` dans `_compute_iv_rank`
+(screener.py). Le backtesting garde `default_timeout=60`.
+
+---
+
+## BUG-030 quater — `as_completed()` bloqué malgré `timeout=10`
+
+**Symptôme** : bloqué à "IV history 2361/4125" au 3e run.
+
+**Cause** : mêmes connexions TCP half-open. Même si la plupart des paires
+complètent via le cache SQLite, les nouvelles paires (nouveaux symboles dans
+l'univers ce run) déclenchent des appels HTTP réels. `requests.get(timeout=10)`
+ne se déclenche toujours pas fiablement sur Windows.
+`as_completed()` attend indéfiniment les futurs bloqués.
+
+**Correction** : remplacement de `as_completed()` par `wait(timeout=15, return_when=FIRST_COMPLETED)`.
+Si aucun futur ne complète en 15 secondes, le warning est loggé et les futurs
+restants sont abandonnés (`executor.shutdown(wait=False, cancel_futures=True)`).
+Le screener continue avec les données déjà cachées et utilise le fallback HV-based
+pour les symboles sans historique suffisant.
