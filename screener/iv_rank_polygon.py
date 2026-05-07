@@ -87,6 +87,7 @@ def _fetch_iv_atm_at_date(
     polygon,
     target_dte: int = 30,
     dte_window: int = 7,
+    rfr: float | None = None,
 ) -> dict | None:
     """
     Pour une date d'échantillon donnée, récupère l'IV ATM en :
@@ -95,6 +96,9 @@ def _fetch_iv_atm_at_date(
     3. Choisissant le strike le plus proche du spot
     4. Fetching le close de ce contrat à sample_date
     5. Inversant l'IV via Black-Scholes
+
+    rfr : taux sans risque pré-calculé (évite appel yfinance dans le thread).
+          Si None, utilise config.DEFAULT_RISK_FREE_RATE.
 
     Retourne un dict {symbol, sample_date, iv_atm, dte, strike, contract_ticker}
     ou None si données indisponibles.
@@ -131,8 +135,8 @@ def _fetch_iv_atm_at_date(
         if price <= 0:
             return None
 
-        # IV via BS
-        rate = polygon.get_risk_free_rate(sample_date)
+        # RFR passé en paramètre pour éviter tout appel yfinance dans les threads
+        rate = rfr if rfr is not None else config.DEFAULT_RISK_FREE_RATE
         tte = max(dte / 365.0, 1 / 365.0)
         iv = _implied_vol("call", price, spot, strike, tte, rate)
         if iv <= 0.01 or iv > 3.0:
@@ -188,10 +192,23 @@ def fetch_or_load_iv_history(
     total = len(to_fetch)
     fetched_count = 0
 
+    # RFR : un seul appel live pour toute la période — évite 52+ appels yfinance
+    # dans les workers (source de blocage sur Windows). Impact IV Rank < 1pt.
+    shared_rfr: float = config.DEFAULT_RISK_FREE_RATE
+    if to_fetch:
+        try:
+            from data.risk_free_rate import fetch_risk_free_rate
+            shared_rfr, _ = fetch_risk_free_rate()
+            logger.info("IV Rank : RFR live = %.3f (partagé pour toutes les dates)", shared_rfr)
+        except Exception:
+            logger.debug("IV Rank : RFR live indisponible, fallback %.3f", shared_rfr)
+
     if total > 0:
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=20) as executor:
             futures = {
-                executor.submit(_fetch_iv_atm_at_date, sym, d, polygon, target_dte): (sym, d)
+                executor.submit(
+                    _fetch_iv_atm_at_date, sym, d, polygon, target_dte, 7, shared_rfr,
+                ): (sym, d)
                 for sym, d in to_fetch
             }
             # Sauvegarde tous les 100 points pour ne pas perdre le cache si interruption

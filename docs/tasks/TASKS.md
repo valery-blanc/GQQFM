@@ -487,6 +487,7 @@
 - [x] screener/iv_rank_polygon.py — fetch_or_load_iv_history (cache parquet, refresh incrémental, parallèle)
 - [x] screener/screener.py — _compute_iv_rank avec fallback HV-based si Polygon indisponible
 - [x] tests/test_iv_rank_polygon.py
+- [x] BUG-030 FIXED : yfinance dans workers → blocage → RFR live unique + max_workers 20
 - [ ] Test ANQA — premier run amorce le cache, classements meilleurs
 - [ ] Commit
 
