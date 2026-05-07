@@ -460,8 +460,8 @@
 - [x] config.py — `SCREENER_PENALTY_MACRO_CRITICAL = 0.6`
 - [x] tests/test_screener_scoring.py — tests macro vs micro
 - [x] docs/specs/option_scanner_spec_v2.md — §14 séparation macro/micro
-- [ ] Test ANQA en séance — top 5 réel (pas fallback)
-- [ ] Commit
+- [x] Test ANQA en séance — top 5 réel (pas fallback) — OK 2026-05-07
+- [x] Commit
 
 ## FEAT-023 — Refonte du screener (3 étapes)
 
@@ -478,8 +478,8 @@
 - [x] config.py — SCREENER_ATM_BAND_PCT, MAX_SPREAD_PCT_ATM, MIN_VOLUME_P25_ATM, etc.
 - [x] tests/test_screener_filters.py — tests ATM (compute_atm_liquidity, tradability, filtres)
 - [x] docs/specs/option_scanner_spec_v2.md — §14.4 mis à jour
-- [ ] Test ANQA — top reflète qualité ATM (SPY/QQQ devraient remonter)
-- [ ] Commit
+- [x] Test ANQA — top 5 cohérent (AMZN, BA, TSLA, NFLX, DIS) — OK 2026-05-07
+- [x] Commit
 
 ## FEAT-024 — Vrai IV Rank 52w via Polygon historique
 
@@ -487,13 +487,11 @@
 - [x] screener/iv_rank_polygon.py — fetch_or_load_iv_history (cache parquet, refresh incrémental, parallèle)
 - [x] screener/screener.py — _compute_iv_rank avec fallback HV-based si Polygon indisponible
 - [x] tests/test_iv_rank_polygon.py
-- [x] BUG-030 FIXED : yfinance dans workers → blocage → RFR live unique + max_workers 20
-- [x] Fix yield cache : try 3 strikes × ±2j adjacents → 2% → ~15% de succès
+- [x] BUG-030 FIXED (série) — voir section BUG-030 ci-dessous
 - [x] Per-ticker HV fallback dans screener.py (< 10 pts Polygon → HV-based)
 - [x] min_points 20→10 dans compute_iv_rank_from_history
-- [x] Cache stale (91 lignes) purgé sur ANQA pour refetch propre
-- [ ] Test ANQA — 2e run : IV Rank différenciés, SPY/QQQ classés correctement
-- [ ] Commit final
+- [x] Test ANQA — IV Rank différenciés (AMZN 34, BA 63, TSLA 16, NFLX 65, DIS 67) — OK 2026-05-07
+- [x] Commit final
 
 ## BUG-029 — Rebalancing weights + RIC IV Rank penalty
 
@@ -503,7 +501,6 @@
 ### Étape 3 — Scoring multi-stratégie + behavior
 - [x] screener/behavior.py — UnderlyingBehavior (autocorr, ATR, gaps, HV ratio, beta, range pos) + batch
 - [x] screener/iv_rank.py — IV Rank 52w approximé HV-based
-- [ ] screener/options_analyzer.py — skew 25-delta (reporté à FEAT-024)
 - [x] screener/scorer.py — `compute_score_calendar` + `compute_score_ric` + composantes
 - [x] screener/universe.py — HIGH_VOL_TICKERS + get_universe(include_high_vol), retrait USO, ajout EFA/IEMG/LQD/IEF/PEP/KO
 - [x] screener/screener.py — branchement profile + behavior + iv_rank_52w batch
@@ -511,5 +508,20 @@
 - [x] ui/components/sidebar.py — radio "Stratégie cible" + checkbox haute vol + détails enrichis
 - [x] tests/test_behavior.py + test_iv_rank.py + test_scoring_multi.py
 - [x] docs/specs/option_scanner_spec_v2.md — §14 mis à jour
-- [ ] Test ANQA — top par profil cohérent
-- [ ] Commit
+- [x] Test ANQA — top par profil cohérent — OK 2026-05-07
+- [x] Commit
+
+## BUG-030 — IV Rank FEAT-024 bloqué (série de 4 fixes)
+
+- [x] BUG-030 : yfinance dans workers → RFR unique main thread + max_workers 20
+- [x] BUG-030 bis : explosion HTTP (retry dates adjacentes) → suppression retries
+- [x] BUG-030 ter : requests.get(timeout=60) non fiable Windows → timeout=10s
+- [x] BUG-030 quater : as_completed() bloqué → wait(timeout=12, FIRST_COMPLETED) + budget 120s
+- [x] cache_polygon.py : connexion SQLite persistante (WAL) → élimine ~400s overhead
+- [x] iv_rank_polygon.py : cacher les échecs (iv_atm=NaN) → plus re-tentés aux runs suivants
+- [x] iv_rank_polygon.py : checkpoint toutes les 20 rows (était 100)
+- [x] screener.py : default_timeout 10→5s pour IV Rank
+- [x] sidebar.py : label obsolète "FEAT-024 future" remplacé par comportement réel
+- [x] docs/bugs/BUG-030-iv-rank-yfinance-thread-hang.md — mis à jour (4 sections)
+- [x] Test ANQA — screener complet sans blocage — OK 2026-05-07
+- [x] Commit (série : ee07b24 → 26b54ea → f318831 → 05edd8d)
