@@ -125,8 +125,8 @@ def _render_screener_section() -> None:
                     f"AC1 {r.autocorr_1d:+.2f}{events_str}"
                 )
             st.caption(
-                "_IV Rank 52w est approximé depuis HV historique — vrai IV Rank "
-                "nécessiterait une source payante (FEAT-024 future)._"
+                "_IV Rank 52w : Polygon historique quand disponible (≥10 pts), "
+                "sinon approximé depuis HV historique._"
             )
 
     # Avertissement hors-séance
