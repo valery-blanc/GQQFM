@@ -212,6 +212,10 @@ def fetch_or_load_iv_history(
         # les connexions TCP half-open → as_completed() se bloque indéfiniment.
         # Si aucun futur ne complète en 15s, on abandonne les workers restants
         # (BUG-030 quater) et on continue avec les données déjà cachées.
+        #
+        # Les paires qui ont terminé (succès ou échec confirmé) sont toutes sauvées
+        # en parquet — y compris les échecs (iv_atm=NaN) — pour ne plus les re-tenter
+        # au prochain run. Seules les paires abandonnées (timeout) sont re-tentées.
         executor = ThreadPoolExecutor(max_workers=20)
         try:
             fut_map = {
@@ -220,10 +224,12 @@ def fetch_or_load_iv_history(
                 ): (sym, d)
                 for sym, d in to_fetch
             }
-            # Sauvegarde tous les 100 points pour ne pas perdre le cache si interruption
-            save_threshold = 100
+            # Checkpoint fréquent : toutes les 20 rows pour limiter la perte en cas de crash
+            save_threshold = 20
             pending = set(fut_map)
             last_progress_ts = _time.monotonic()
+            # Paires dont le futur a terminé (succès OU échec confirmé)
+            completed_pairs: set[tuple[str, date]] = set()
 
             while pending:
                 done, pending = _wait(pending, timeout=15, return_when=FIRST_COMPLETED)
@@ -239,45 +245,72 @@ def fetch_or_load_iv_history(
                     break
 
                 last_progress_ts = _time.monotonic()
+                batch_rows: list[dict] = []
                 for future in done:
                     sym, d = fut_map[future]
                     fetched_count += 1
+                    completed_pairs.add((sym, d))
                     try:
                         row = future.result()
-                        if row is not None:
-                            new_rows.append(row)
                     except Exception as exc:
                         logger.debug("IV history future %s @ %s : %s", sym, d, exc)
+                        row = None
+
+                    if row is not None:
+                        batch_rows.append(row)
+                    else:
+                        # Échec confirmé : cacher NaN pour ne plus re-tenter
+                        batch_rows.append({
+                            "symbol": sym,
+                            "sample_date": d,
+                            "iv_atm": float("nan"),
+                            "dte": 0,
+                            "strike": 0.0,
+                            "contract_ticker": "",
+                        })
+
                     if progress_callback:
                         pct = fetched_count / total
                         progress_callback(pct, f"IV history {fetched_count}/{total}")
-                    # Checkpoint périodique
-                    if len(new_rows) >= save_threshold:
-                        cache_to_save = pd.concat(
-                            [cache, pd.DataFrame(new_rows)], ignore_index=True
-                        ).drop_duplicates(subset=["symbol", "sample_date"], keep="last")
-                        _save_cache(cache_to_save)
-                        cache = cache_to_save
-                        new_rows = []
+
+                new_rows.extend(batch_rows)
+                # Checkpoint toutes les save_threshold rows
+                if len(new_rows) >= save_threshold:
+                    cache_to_save = pd.concat(
+                        [cache, pd.DataFrame(new_rows)], ignore_index=True
+                    ).drop_duplicates(subset=["symbol", "sample_date"], keep="last")
+                    _save_cache(cache_to_save)
+                    cache = cache_to_save
+                    new_rows = []
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
 
-    # Mise à jour cache
+    # Sauvegarde finale (rows restants non encore flushés)
     if new_rows:
         new_df = pd.DataFrame(new_rows)
         cache = pd.concat([cache, new_df], ignore_index=True)
         cache = cache.drop_duplicates(subset=["symbol", "sample_date"], keep="last")
         _save_cache(cache)
-        logger.info("IV history : %d nouveaux points cachés", len(new_rows))
+    valid_count = int(cache["iv_atm"].notna().sum()) if not cache.empty else 0
+    logger.info(
+        "IV history cache : %d lignes totales dont %d IV valides",
+        len(cache), valid_count,
+    )
 
     # Construit le dict de retour : symbol → [(date, iv), ...]
+    # Les lignes NaN (échecs cachés) sont exclues du résultat.
     result: dict[str, list[tuple[date, float]]] = {}
     if cache.empty:
         return {sym: [] for sym in symbols_list}
 
     cache_dates = set(sample_dates)
     for sym in symbols_list:
-        sym_df = cache[(cache["symbol"] == sym) & (cache["sample_date"].isin(cache_dates))]
+        sym_df = cache[
+            (cache["symbol"] == sym)
+            & (cache["sample_date"].isin(cache_dates))
+            & cache["iv_atm"].notna()
+            & (cache["iv_atm"] > 0)
+        ]
         if sym_df.empty:
             result[sym] = []
             continue
