@@ -302,6 +302,7 @@ def _render_grid(results: dict, tab_suffix: str, params: dict) -> None:
     symbols_list = results.get("symbols") or [None] * n_total
 
     current_selected = st.session_state.get(selected_key, 0)
+    newly_selected: int | None = None
 
     for row in range(_GRID_ROWS):
         cols = st.columns(_GRID_COLS)
@@ -337,8 +338,12 @@ def _render_grid(results: dict, tab_suffix: str, params: dict) -> None:
                     if st.button(btn_label, key=f"sel_{tab_suffix}_{combo_idx}",
                                  use_container_width=True,
                                  type="primary" if is_selected else "secondary"):
-                        st.session_state[selected_key] = combo_idx
-                        st.rerun()
+                        newly_selected = combo_idx
+
+    # Rerun hors de tout contexte colonne/container pour fiabilité
+    if newly_selected is not None and newly_selected != current_selected:
+        st.session_state[selected_key] = newly_selected
+        st.rerun()
 
 
 def _render_grid_details_compact(results: dict, selected_idx_key: str,
