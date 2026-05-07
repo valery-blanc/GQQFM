@@ -258,10 +258,24 @@ def run_multi_scan(params: dict) -> dict:
     }
 
 
-def _render_grid(results: dict, tab_suffix: str, params: dict) -> None:
-    """Affiche les résultats en vue grille 4×6."""
-    n_total = results["n_found"]
+def _combo_title_std(combo, symbol: str | None) -> str:
+    """Retourne le nom standard du combo : 'L3 call SPY 17JUL2026 720 | ...'."""
+    ticker_part = f" {symbol}" if symbol else ""
+    return " | ".join(
+        f"{'L' if l.direction == 1 else 'S'}{l.quantity}"
+        f" {l.option_type}{ticker_part}"
+        f" {l.expiration.strftime('%d%b%Y').upper()} {l.strike:g}"
+        for l in combo.legs
+    )
 
+
+def _render_grid(results: dict, tab_suffix: str, params: dict) -> None:
+    """Affiche les résultats en vue grille 4×6. Sélection par clic sur le graphe."""
+    selected_key = "live_selected_idx" if tab_suffix == "live" else "bt_selected_idx"
+    if selected_key not in st.session_state:
+        st.session_state[selected_key] = 0
+
+    n_total = results["n_found"]
     page_key = f"grid_page_{tab_suffix}"
     if page_key not in st.session_state:
         st.session_state[page_key] = 0
@@ -287,6 +301,9 @@ def _render_grid(results: dict, tab_suffix: str, params: dict) -> None:
 
     symbols_list = results.get("symbols") or [None] * n_total
 
+    # Collect click events AFTER rendering all charts (avoid premature rerun)
+    click_detected: int | None = None
+
     for row in range(_GRID_ROWS):
         cols = st.columns(_GRID_COLS)
         for col_idx in range(_GRID_COLS):
@@ -300,25 +317,76 @@ def _render_grid(results: dict, tab_suffix: str, params: dict) -> None:
                 pnl = results["pnl_per_combo"][combo_idx]
                 spot = results["spots"][combo_idx]
                 symbol = symbols_list[combo_idx]
+                is_selected = (combo_idx == st.session_state.get(selected_key, 0))
 
+                title_std = _combo_title_std(combo, symbol)
                 fig = plot_pnl_mini(
-                    combo, pnl, results["spot_ranges"][combo_idx], spot, symbol
+                    combo, pnl, results["spot_ranges"][combo_idx], spot, symbol,
+                    title=title_std,
                 )
-                st.plotly_chart(fig, use_container_width=True)
-                st.caption(
-                    f"**#{combo_idx+1}** — Score {m['score']:.2f}\n"
-                    f"±1σ ${m['max_gain_real_dollar']:+.0f} | "
-                    f"Ann. {m['annualized_return_pct']:.0f}%"
-                )
-                selected_key = "live_selected_idx" if tab_suffix == "live" else "bt_selected_idx"
-                if st.button(
-                    "Sélectionner",
-                    key=f"sel_{tab_suffix}_{combo_idx}",
-                    use_container_width=True,
-                ):
-                    st.session_state[selected_key] = combo_idx
-                    st.session_state[f"view_mode_{tab_suffix}"] = "Vue unique"
-                    st.rerun()
+
+                chart_key = f"mini_{tab_suffix}_{combo_idx}"
+                proc_key = f"_proc_{chart_key}"
+
+                with st.container(border=is_selected):
+                    event = st.plotly_chart(
+                        fig, use_container_width=True,
+                        on_select="rerun", key=chart_key,
+                    )
+                    st.caption(
+                        f"**#{combo_idx+1}** — {m['score']:.2f} | "
+                        f"±1σ ${m['max_gain_real_dollar']:+.0f}"
+                    )
+
+                # Process click: on_select="rerun" already triggered a rerun;
+                # use processed_key to avoid infinite loop on subsequent reruns.
+                if event.selection.points and not st.session_state.get(proc_key, False):
+                    st.session_state[proc_key] = True
+                    click_detected = combo_idx
+                elif not event.selection.points:
+                    st.session_state.pop(proc_key, None)
+
+    if click_detected is not None:
+        st.session_state[selected_key] = click_detected
+        st.rerun()
+
+
+def _render_grid_details(results: dict, selected_idx_key: str,
+                         days_before_close: int, as_of=None) -> None:
+    """Affiche graphe + détails du combo sélectionné — utilisé sous la grille."""
+    idx = st.session_state.get(selected_idx_key, 0)
+    idx = min(idx, results["n_found"] - 1)
+    combo = results["combinations"][idx]
+    m = results["metrics"][idx]
+    pnl_for_combo = results["pnl_per_combo"][idx]
+
+    symbols_list = results.get("symbols")
+    combo_symbol = symbols_list[idx] if symbols_list else results.get("symbol")
+
+    title_std = _combo_title_std(combo, combo_symbol)
+    st.code(title_std, language=None)
+
+    fig = plot_pnl_profile(
+        combination=combo,
+        pnl_tensor=pnl_for_combo,
+        spot_range=results["spot_ranges"][idx],
+        current_spot=results["spots"][idx],
+        loss_prob=m["loss_prob_pct"] / 100,
+        max_loss_pct=m["max_loss_pct"],
+        max_gain_pct=m["max_gain_pct"],
+        symbol=combo_symbol,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    render_combo_detail(
+        combo, m,
+        symbol=combo_symbol,
+        pnl_tensor=pnl_for_combo,
+        spot_range=results["spot_ranges"][idx],
+        current_spot=results["spots"][idx],
+        days_before_close=days_before_close,
+        **({"as_of": as_of} if as_of is not None else {}),
+    )
 
 
 def _render_single(results: dict, selected_idx_key: str, params: dict,
@@ -490,24 +558,25 @@ def render_live_page(base_params: dict) -> None:
 
     st.markdown("---")
 
-    # ── Toggle vue ─────────────────────────────────────────────────────────
-    if "view_mode_live" not in st.session_state:
-        st.session_state["view_mode_live"] = "Grille"
-
+    # ── Toggle vue — proxy key pour éviter le crash session_state ──────────
+    _vm_opts = ["Grille", "Vue unique"]
+    _vm_cur = st.session_state.get("_view_mode_live", "Grille")
+    _vm_idx = _vm_opts.index(_vm_cur) if _vm_cur in _vm_opts else 0
     view_mode = st.radio(
-        "Affichage",
-        options=["Grille", "Vue unique"],
-        horizontal=True,
-        key="view_mode_live",
-        label_visibility="collapsed",
+        "Affichage", options=_vm_opts, index=_vm_idx,
+        horizontal=True, label_visibility="collapsed",
     )
+    st.session_state["_view_mode_live"] = view_mode
 
     st.markdown("---")
 
+    if "live_selected_idx" not in st.session_state:
+        st.session_state.live_selected_idx = 0
+    dbc = results.get("days_before_close", params.get("days_before_close", 3))
+
     if view_mode == "Grille":
         _render_grid(results, "live", params)
+        st.markdown("---")
+        _render_grid_details(results, "live_selected_idx", days_before_close=dbc)
     else:
-        if "live_selected_idx" not in st.session_state:
-            st.session_state.live_selected_idx = 0
-        _render_single(results, "live_selected_idx", params,
-                       days_before_close=results.get("days_before_close", params.get("days_before_close", 3)))
+        _render_single(results, "live_selected_idx", params, days_before_close=dbc)

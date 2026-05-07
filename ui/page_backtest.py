@@ -556,25 +556,28 @@ def render_backtest_page(base_params: dict) -> None:
 
     st.markdown("---")
 
-    # ── Toggle vue grille / unique ─────────────────────────────────────────
-    from ui.page_live import _render_grid
+    # ── Toggle vue — proxy key pour éviter le crash session_state ──────────
+    from ui.page_live import _render_grid, _render_grid_details
 
-    if "view_mode_bt" not in st.session_state:
-        st.session_state["view_mode_bt"] = "Grille"
-
+    _vm_opts = ["Grille", "Vue unique"]
+    _vm_cur = st.session_state.get("_view_mode_bt", "Grille")
+    _vm_idx = _vm_opts.index(_vm_cur) if _vm_cur in _vm_opts else 0
     view_mode = st.radio(
-        "Affichage",
-        options=["Grille", "Vue unique"],
-        horizontal=True,
-        key="view_mode_bt",
-        label_visibility="collapsed",
+        "Affichage", options=_vm_opts, index=_vm_idx,
+        horizontal=True, label_visibility="collapsed",
     )
+    st.session_state["_view_mode_bt"] = view_mode
 
     st.markdown("---")
 
     if view_mode == "Grille":
         _render_grid(results, "bt", params)
-        # Le replay est disponible uniquement en vue unique
+        st.markdown("---")
+        _render_grid_details(
+            results, "bt_selected_idx",
+            days_before_close=results.get("days_before_close", params.get("days_before_close", 3)),
+            as_of=as_of,
+        )
         return
 
     # ── Vue unique ─────────────────────────────────────────────────────────

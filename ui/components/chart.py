@@ -193,7 +193,7 @@ def plot_pnl_profile(
         ),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         hovermode="x unified",
-        height=600,
+        height=1200,
         margin=dict(l=60, r=60, t=60, b=40),
     )
 
@@ -206,8 +206,9 @@ def plot_pnl_mini(
     spot_range: "np.ndarray",
     current_spot: float,
     symbol: str | None = None,
+    title: str | None = None,
 ) -> go.Figure:
-    """Mini P&L chart for grid view — simplified, height=280."""
+    """Mini P&L chart for grid view — simplified, height=280. title overrides auto-generated."""
     net_debit = combination.net_debit
     pnl_mid = pnl_tensor[1]
     pnl_pct = pnl_mid / net_debit * 100 if abs(net_debit) > 0.01 else pnl_mid
@@ -236,23 +237,31 @@ def plot_pnl_mini(
         showlegend=False, hoverinfo="skip",
     ))
 
+    # Invisible markers for on_select click detection
+    fig.add_trace(go.Scatter(
+        x=spot_range[::5], y=pnl_pct[::5],
+        mode="markers",
+        marker=dict(size=20, opacity=0, color="rgba(0,0,0,0)"),
+        showlegend=False, hoverinfo="skip",
+    ))
+
     fig.add_vline(x=current_spot, line=dict(color="white", dash="dash", width=1))
     fig.add_hline(y=0, line=dict(color="gray", dash="dot", width=0.5))
 
-    ticker_part = f" {symbol}" if symbol else ""
-    legs_short = [
-        f"{'L' if l.direction == 1 else 'S'}{l.quantity}"
-        f" {l.option_type[0].upper()}{ticker_part}"
-        f" {l.expiration.strftime('%d%b').upper()} {l.strike:g}"
-        for l in combination.legs
-    ]
-    title = " | ".join(legs_short[:2])
+    if title is None:
+        ticker_part = f" {symbol}" if symbol else ""
+        title = " | ".join(
+            f"{'L' if l.direction == 1 else 'S'}{l.quantity}"
+            f" {l.option_type}{ticker_part}"
+            f" {l.expiration.strftime('%d%b%Y').upper()} {l.strike:g}"
+            for l in combination.legs
+        )
 
     fig.update_layout(
-        title=dict(text=title, font=dict(size=7)),
+        title=dict(text=title, font=dict(size=9)),
         template="plotly_dark",
         height=280,
-        margin=dict(l=20, r=8, t=28, b=20),
+        margin=dict(l=20, r=8, t=48, b=20),
         xaxis=dict(showticklabels=False, showgrid=False),
         yaxis=dict(ticksuffix="%", tickfont=dict(size=7), showgrid=True),
         showlegend=False,
