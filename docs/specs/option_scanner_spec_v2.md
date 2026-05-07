@@ -183,15 +183,21 @@ class Leg:
     contract_symbol: str       # symbole yfinance (ex: "AAPL240816C00490000")
     volume: int
     open_interest: int
+    div_yield: float = 0.0     # rendement de dividende continu annualisé
+    bid: float | None = None   # FEAT-026 : prix bid pour calcul du slippage (None si absent)
+    ask: float | None = None   # FEAT-026 : prix ask pour calcul du slippage (None si absent)
 
 @dataclass
 class Combination:
     """Une combinaison de 2 à 4 legs."""
     legs: list[Leg]            # 2 à 4 legs selon le template
-    net_debit: float           # débit net (coût d'entrée), EN DOLLARS, multiplicateur ×100 INCLUS
+    net_debit: float           # débit net (cash sorti), EN DOLLARS, multiplicateur ×100 INCLUS
                                # Formule : net_debit = Σ (direction × quantity × entry_price × 100)
                                # TOUJOURS > 0 (les crédits nets sont filtrés par le Combinator).
-                               # Le capital engagé = net_debit.
+                               # FEAT-026b : NE représente PAS le capital immobilisé pour les
+                               # structures avec shorts non couverts (calendar/double calendar).
+                               # Capital effectivement bloqué = max(|net_debit|, |max_loss|),
+                               # calculé per-combo dans scoring/metrics.py.
     close_date: date           # date de clôture = min(expiration des legs short)
                                # Déterminée AUTOMATIQUEMENT par le Combinator.
     template_name: str         # nom du template source
@@ -423,7 +429,9 @@ def generate_combinations(
 ```
 
 **Règle : net_debit > 0 obligatoire** — les positions en crédit net sont exclues
-(le capital engagé est le débit net × 100).
+(`net_debit` est le cash sorti à l'ouverture en dollars réels, ×100 inclus).
+Le capital effectivement immobilisé n'est PAS net_debit (FEAT-026b) :
+voir §6.4 et `scoring/metrics.py:capital_required`.
 
 **Règle : max_iterations** — protège contre les templates à contraintes sélectives
 (ex: double_calendar avec même strike) qui nécessiteraient des milliards d'itérations.
@@ -709,10 +717,11 @@ class ScoringCriteria:
 
     # Pertes capées
     max_loss_pct: float = -6.0
-    # Perte maximale autorisée en % du capital engagé (net_debit).
+    # Perte maximale autorisée en % du capital immobilisé (FEAT-026b).
+    # capital_immobilisé = max(|net_debit|, |max_loss|).
     # On utilise le scénario de vol median.
-    # Formule : max_loss_pct = min(pnl_curve) / net_debit × 100
-    # Valeur négative. Ex: -6.0 signifie que la perte max est 6% du capital.
+    # Formule : max_loss_pct = min(pnl_curve) / capital_required × 100
+    # Valeur négative. Ex: -6.0 signifie que la perte max est 6% du capital bloqué.
 
     # Probabilité de perte
     max_loss_probability_pct: float = 25.0
@@ -723,9 +732,9 @@ class ScoringCriteria:
 
     # Potentiel de gain
     min_max_gain_pct: float = 50.0
-    # Gain maximal minimum (en % du capital engagé) que la stratégie doit offrir.
-    # Calculé aux extrêmes de la grille de spot (±15% du spot).
-    # Formule : max_gain_pct = max(pnl_curve) / net_debit × 100
+    # Gain maximal minimum (en % du capital immobilisé) que la stratégie doit offrir.
+    # Pour le filtrage, on utilise le gain max ±1σ (réaliste, FEAT-017).
+    # Formule : max_gain_real_pct = max(pnl_curve[mask_±1σ]) / capital_required × 100
 
     # Ratio gain/perte
     min_gain_loss_ratio: float = 5.0
@@ -796,21 +805,24 @@ def filter_combinations_gpu(
 
     Retourne: xp.ndarray d'indices des combinaisons valides (shape variable).
 
-    Étapes (toutes sur GPU) :
+    Étapes (toutes sur GPU, FEAT-026b — % sur capital_required) :
     1. Sélectionner le scénario de vol median : pnl_mid = pnl_tensor[1]  # index 1 = vol × 1.0
-    2. Calculer max_loss par combinaison : min(pnl_mid, axis=1) / net_debits
-    3. Calculer max_gain par combinaison : max(pnl_mid, axis=1) / net_debits
-    4. Calculer loss_probability : compute_loss_probability_gpu(...)
-    5. Calculer gain_loss_ratio : max_gain / |max_loss|
-    6. Appliquer tous les filtres simultanément avec un masque booléen:
+    2. Calculer max_loss = min(pnl_mid, axis=1) ; max_gain_real = ... (fenêtre ±1σ)
+    3. Calculer capital_required = max(|net_debits|, |max_loss|)  # FEAT-026b
+    4. max_loss_pct = max_loss / capital_required × 100
+       max_gain_real_pct = max_gain_real / capital_required × 100
+    5. Calculer loss_probability : compute_loss_probability_gpu(...)
+    6. Calculer gain_loss_ratio : max_gain_real / |max_loss|
+    7. Appliquer tous les filtres simultanément avec un masque booléen:
        mask = (
            (max_loss_pct >= criteria.max_loss_pct) &
            (loss_prob <= criteria.max_loss_probability_pct / 100) &
-           (max_gain_pct >= criteria.min_max_gain_pct) &
+           (max_gain_real_pct >= criteria.min_max_gain_pct) &
            (gain_loss_ratio >= criteria.min_gain_loss_ratio) &
-           (net_debits <= criteria.max_net_debit)
+           (net_debits <= criteria.max_net_debit) &
+           (avg_volumes >= criteria.min_avg_volume)
        )
-    7. Retourner xp.where(mask)[0]
+    8. Retourner xp.where(mask)[0]
     """
 ```
 
@@ -825,8 +837,8 @@ Métriques per-combo (BUG-022 — post-filtrage, boucle Python) :
 - `atm_vol_i` = IV du leg dont `|strike − spot|` est minimal
 - `days_i` = `(combo.close_date − today).days`
 - `max_gain_real_i` = max P&L dans `[spot × (1−atm_vol_i×√(days_i/365)), spot × (1+...)]`
-- `nd` = `abs(net_debit)` (évite inversion de signe sur spreads à crédit)
-- Colonnes additionnelles : `Gain ±1σ $`, `$/j` (gain par jour jusqu'à J-3 short)
+- `capital_required` = `max(|net_debit|, |max_loss|)` (FEAT-026b — base des %)
+- Colonnes additionnelles : `Gain ±1σ $`, `$/j`, `% / an`, `Liq.`, `Disp. vol`, `Slipp.`
 
 ### 6.4 Scoring pour le classement des résultats — FEAT-026 + 026b
 
@@ -871,13 +883,14 @@ donc le composant 1 doit être absolu pour ne pas faire double emploi.
 
 | Métrique | Formule |
 |---|---|
-| `max_loss_pct` | `min(pnl_mid) / |net_debit| × 100` |
-| `max_gain_real_pct` | `max(pnl_mid[mask_±1σ]) / |net_debit| × 100` |
+| `capital_required` | `max(|net_debit|, |max_loss|)` — base des % (FEAT-026b) |
+| `max_loss_pct` | `min(pnl_mid) / capital_required × 100` |
+| `max_gain_real_pct` | `max(pnl_mid[mask_±1σ]) / capital_required × 100` |
 | `annualized_return_pct` | `max_gain_real_pct × 365 / days_to_close` |
 | `loss_prob` | ∫ (P&L<0) × pdf_lognormale dS, ∈ [0, 1] |
 | `liquidity_score` | `min(volume × open_interest)` sur les legs |
-| `vol_dispersion_pct` | `std(P&L[V scénarios] au spot courant) / |net_debit| × 100` |
-| `slippage_pct` | `Σ((ask−bid) × qty × 100) / |net_debit|` (NaN si bid/ask absent) |
+| `vol_dispersion_pct` | `std(P&L[V scénarios] au spot courant) / capital_required × 100` |
+| `slippage_pct` | `Σ((ask−bid) × qty × 100) / capital_required` (NaN si bid/ask absent) |
 
 **Slippage NaN-safe :** `bid`/`ask` rarement disponibles (yfinance hors séance,
 polygon historique, saisie directe). Si au moins une leg manque bid ou ask,
@@ -923,7 +936,7 @@ def plot_pnl_profile(
        - Probabilité de perte
        - Net debit (coût d'entrée)
     8. Axe X : prix du sous-jacent (et % de variation en haut)
-    9. Axe Y gauche : P&L en % du capital engagé
+    9. Axe Y gauche : P&L en % du capital immobilisé (capital_required)
     10. Axe Y droit : P&L en valeur absolue
 
     Utiliser Plotly pour l'interactivité (hover, zoom).
@@ -1529,7 +1542,7 @@ Ce tableau résume les décisions prises lors de la revue des spécifications.
 | A2 | **Fallback CPU** : les tests doivent-ils tourner sans GPU ? | Oui obligatoirement. Module `engine/backend.py` expose `xp` (CuPy ou NumPy). Tous les tests sauf `test_gpu.py` (`@pytest.mark.gpu`) utilisent le backend CPU. | `backend.py`, tous les fichiers `engine/` |
 | A3 | **get_risk_free_rate()** : constante ou API live ? | **API live ^IRX (FEAT-012)** : `data/risk_free_rate.py` fetch le T-bill 13 semaines via yfinance, divise par 100, valide ∈ ]0, 20[ %. Cache 1 h dans la sidebar via `st.cache_data`. Fallback `config.DEFAULT_RISK_FREE_RATE = 0.045` si erreur réseau. Caption sidebar indique la source (`✓ ^IRX live` ou `⚠ fallback constante`). | `data/risk_free_rate.py`, `data/provider_yfinance.py`, `ui/components/sidebar.py` |
 | A4 | **Scénario vol median** : modifiable ? | Non. Toujours `1.0` (vol inchangée). Seules les bornes (vol basse/haute) sont modifiables par l'utilisateur. Le scorer et les filtres utilisent exclusivement le scénario median. | `config.py`, `filters.py`, `chart.py` |
-| A5 | **net_debit** : inclut-il le ×100 ? | Oui. `net_debit` est en dollars réels : `Σ (direction × qty × entry_mid × 100)`. TOUJOURS > 0 (les positions en crédit net sont filtrées par le Combinator). Capital engagé = `net_debit`. | `Combination`, `scorer.py`, `filters.py` |
+| A5 | **net_debit** : inclut-il le ×100 ? Représente-t-il le capital immobilisé ? | Oui pour le ×100 : `net_debit = Σ (direction × qty × entry_mid × 100)`, en dollars réels. TOUJOURS > 0 (les positions en crédit net sont filtrées par le Combinator). **NON pour le capital immobilisé (FEAT-026b)** : pour les calendars/double calendars, les shorts non couverts génèrent une marge broker qui peut excéder net_debit. **Capital effectif = max(\|net_debit\|, \|max_loss\|)**, calculé per-combo dans `scoring/metrics.py:capital_required`. Tous les % du scoring v2 sont sur ce capital_required. | `Combination`, `scoring/metrics.py`, `scoring/scorer.py`, `ui/combo_detail.py` |
 | A6 | **use_adjacent_expiry_pairs** : pourquoi ce flag ? | Les templates diagonales (Call Diagonal Backspread, Call Ratio Diagonal) nécessitent de tester TOUTES les paires (NEAR, FAR) à 5–45 jours d'écart, pas seulement (expirations[0], expirations[-1]). Flag dans `TemplateDefinition`. | `templates/base.py`, `engine/combinator.py` |
 | A7 | **Prix hors-séance (1re passe)** : comment gérer bid=ask=0 ? | Si bid=ask=0 pour un contrat, utiliser `lastPrice` comme proxy. Calculer l'IV par bisection (Black-Scholes inverse). Si IV < 0.01 : exclure le contrat. | `data/provider_yfinance.py` |
 | A8 | **Re-pricing consensus IV (BUG-003)** : quand s'applique-t-il ? | Quand TOUTES les options d'une expiration ont bid=ask=0 (marché fermé). Calcul IV consensus depuis les options OTM (médiane des IV dans [0.05, 1.5]). Re-pricing BS de TOUTES les options de l'expiration. Corrige les `lastPrice` stales ITM. | `data/provider_yfinance.py` |
