@@ -233,11 +233,10 @@ class UnderlyingScreener:
             from data.provider_polygon import PolygonHistoricalProvider, resolve_polygon_key
             from screener.iv_rank_polygon import fetch_or_load_iv_history, compute_iv_rank_from_history
             if resolve_polygon_key():
-                # Timeout court (10s) : les appels IV Rank sont simples (daily agg).
-                # Le timeout de 60s par défaut cause des blocages sur les connexions
-                # TCP half-open sur Windows (BUG-030 bis).
-                polygon = PolygonHistoricalProvider(default_timeout=10)
-                logger.info("IV Rank : utilise Polygon (vrai rank historique, timeout=10s)")
+                # Timeout 5s : les appels IV Rank sont des daily agg (petits).
+                # 10s trop lent sur Windows TCP half-open (BUG-030 ter/quater).
+                polygon = PolygonHistoricalProvider(default_timeout=5)
+                logger.info("IV Rank : utilise Polygon (vrai rank historique, timeout=5s)")
                 history = fetch_or_load_iv_history(
                     symbols, polygon, progress_callback=progress_callback
                 )

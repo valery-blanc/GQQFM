@@ -226,16 +226,29 @@ def fetch_or_load_iv_history(
             }
             # Checkpoint fréquent : toutes les 20 rows pour limiter la perte en cas de crash
             save_threshold = 20
+            # Budget temps total : évite de bloquer le screener > 2 min sur les HTTP calls.
+            # Les paires abandonnées seront retentées au prochain run (pas mises en NaN).
+            MAX_TOTAL_SECONDS = 120
             pending = set(fut_map)
-            last_progress_ts = _time.monotonic()
+            start_ts = _time.monotonic()
+            last_progress_ts = start_ts
             # Paires dont le futur a terminé (succès OU échec confirmé)
             completed_pairs: set[tuple[str, date]] = set()
 
             while pending:
-                done, pending = _wait(pending, timeout=15, return_when=FIRST_COMPLETED)
+                elapsed = _time.monotonic() - start_ts
+                if elapsed >= MAX_TOTAL_SECONDS:
+                    logger.warning(
+                        "IV history : budget temps %.0fs épuisé — %d paires abandonnées",
+                        elapsed, len(pending),
+                    )
+                    break
+
+                remaining = MAX_TOTAL_SECONDS - elapsed
+                done, pending = _wait(pending, timeout=min(12, remaining), return_when=FIRST_COMPLETED)
 
                 if not done:
-                    # Aucun résultat en 15s → au moins un worker bloqué
+                    # Aucun résultat dans le délai → workers bloqués
                     idle_s = _time.monotonic() - last_progress_ts
                     logger.warning(
                         "IV history : aucun résultat depuis %.0fs — "
