@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-026 + 026b (2026-05-07)
+> Version : FEAT-027 (2026-05-07)
 
 ## 1. Vue d'ensemble
 
@@ -958,52 +958,40 @@ Chaque ligne est cliquable pour afficher le graphique P&L détaillé.
 
 ### 8.1 Layout
 
+**FEAT-027 — Navigation par tabs (remplace la sidebar)**
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    OPTIONS P&L SCANNER                       │
-├──────────────────────────┬──────────────────────────────────┤
-│  PANNEAU GAUCHE (sidebar)│  ZONE PRINCIPALE                 │
-│                          │                                   │
-│  Sous-jacent(s):         │  ┌─────────────────────────────┐ │
-│  [SPY,AAPL,NVDA      ]  │  │ RÉSUMÉ DU SCAN              │ │
-│  (séparés par virgules)  │  │ Combinaisons testées: 340K  │ │
-│                          │  │ Résultats trouvés: 47       │ │
-│  Templates:              │  │ Temps GPU: 1.2s             │ │
-│  ☑ Calendar Strangle     │  └─────────────────────────────┘ │
-│  ☑ Double Calendar       │                                   │
-│  ☑ Rev. Iron Condor Cal. │  ┌─────────────────────────────┐ │
-│  ☑ Call Diag. Backspread │  │ GRAPHIQUE P&L               │ │
-│  ☑ Call Ratio Diagonal   │  │ (Plotly interactif, 4× tall)│ │
-│                          │  │                             │ │
-│  ── Critères ──          │  │     ╱              ╲       │ │
-│  Perte max: [-50 ] %    │  │   ╱                  ╲    │ │
-│  Proba perte: [25 ] %   │  │  ╱     ──────────     ╲   │ │
-│  Gain min: [10  ] %     │  │ ╱                       ╲ │ │
-│  Ratio G/L: [0.1 ]      │  └─────────────────────────────┘ │
-│  Budget max: [10000] $   │                                   │
-│                          │  ┌─────────────────────────────┐ │
-│  ── Scénarios Vol ──     │  │ TABLEAU DES RÉSULTATS       │ │
-│  Vol basse: [0.8 ] ×    │  │ (trié par score, cliquable) │ │
-│  Vol haute: [1.2 ] ×    │  │ police 82%, legs avec |     │ │
-│                          │  └─────────────────────────────┘ │
-│  [🔍 LANCER LE SCAN]    │                                   │
-│                          │  ┌─────────────────────────────┐ │
-│  ── GPU Info ──          │  │ DÉTAILS DE LA COMBINAISON   │ │
-│  Device: RTX 5070 Ti     │  │ Legs, Greeks, coûts détaillés│ │
-│  VRAM: 12.1/16.0 GB     │  └─────────────────────────────┘ │
-│  Batch size: 250K        │                                   │
-└──────────────────────────┴──────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  OPTIONS P&L SCANNER                                          │
+├────────┬─────────┬─────────┬────────────┬────────────────────┤
+│  Live  │Backtest │ Tracker │  Screener  │    Paramètres      │
+├────────┴─────────┴─────────┴────────────┴────────────────────┤
+│  [SPY,AAPL     ] Sous-jacents   [🔍 Lancer le scan]          │
+│                                                               │
+│  [Grille] [Vue unique]   ← toggle affiché à droite du résumé │
+│                                                               │
+│  Vue Grille (défaut) :                                        │
+│  ┌────────┬────────┬────────┬────────┬────────┬────────┐     │
+│  │#1 0.87 │#2 0.82 │#3 0.79 │#4 0.75 │#5 0.71 │#6 0.68 │    │
+│  │ [chart]│ [chart]│ [chart]│ [chart]│ [chart]│ [chart]│     │
+│  ├────────┼────────┼────────┼────────┼────────┼────────┤     │
+│  │ ... 4 lignes × 6 colonnes = 24 mini-graphes/page ...│     │
+│  └────────┴────────┴────────┴────────┴────────┴────────┘     │
+│  [◀ Préc.]  Résultats 1–24 / 47  [Suiv. ▶]                   │
+│                                                               │
+│  Vue Unique : graphe P&L height=600px + tableau + détails     │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### 8.2 Interactions
 
-1. L'utilisateur entre un ou plusieurs tickers séparés par des virgules (ex: `SPY,AAPL,NVDA`) et ajuste les critères
-2. Clic sur "Lancer le scan" :
-   - Pour chaque ticker : chargement chaîne, génération combos, calcul GPU, filtrage
-   - Agrégation de tous les résultats, tri par score, retour du top 100
-3. Les résultats apparaissent dans le tableau (1 ligne = 1 combinaison, triées par score)
-4. Clic sur une ligne → le graphique P&L se met à jour
-5. Les détails de la combinaison sélectionnée s'affichent en bas
+1. L'utilisateur entre un ou plusieurs tickers dans l'onglet Live ou Backtest
+2. Clic sur "Lancer le scan" : chargement, combos, GPU, filtrage, tri par score
+3. Les résultats s'affichent en **vue grille par défaut** (4×6 mini-graphes)
+4. Navigation Préc./Suiv. pour parcourir les 24 suivants/précédents
+5. Clic sur "Sélectionner" sous un mini-graphe → vue unique pour ce combo
+6. Vue unique : graphe P&L + tableau résultats + détails combo + replay (backtest)
+7. Les paramètres du scan sont dans l'onglet **Paramètres** (templates, critères, vol, pricer, DTE, score weights)
 
 **Panneau "Plan de sortie" (FEAT-010)** — affiché dans `combo_detail`, sous les
 4 métriques principales et au-dessus du tableau des legs. Les seuils sont

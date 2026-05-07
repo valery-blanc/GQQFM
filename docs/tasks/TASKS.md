@@ -551,6 +551,20 @@
 - [x] Commit fa3d88d + 42e6b5d (test fix)
 - [x] Test ANQA — ranking + sliders + fallback bid/ask manquants — validé 2026-05-07
 
+## FEAT-027 — Réorganisation des pages (tabs + grille)
+
+- [x] docs/specs/FEAT-027-page-reorganization.md — spec complète
+- [x] ui/components/chart.py — ajout plot_pnl_mini() ; height 1680→600
+- [x] ui/components/sidebar.py — réduit à get_base_params() + _cached_risk_free_rate()
+- [x] ui/page_params.py — nouveau : tous les widgets paramètres
+- [x] ui/page_screener.py — nouveau : page screener
+- [x] ui/page_live.py — nouveau : page live avec run_scan + grid view
+- [x] ui/page_backtest.py — inputs date/ticker en haut ; grid view
+- [x] ui/app.py — routeur tabs (5 tabs)
+- [ ] docs/specs/option_scanner_spec_v2.md — mise à jour §UI + version FEAT-027
+- [ ] Test ANQA — navigation tabs + grid view + screener inject
+- [ ] Commit
+
 ## FEAT-026b — Capital immobilisé + gain ±1σ en $ priorité #1
 
 - [x] scoring/metrics.py — ajout `capital_required = max(|net_debit|, |max_loss|)`

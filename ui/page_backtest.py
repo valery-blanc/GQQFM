@@ -392,8 +392,10 @@ def _plot_replay_hourly(points, combo, as_of, resolution: str = "1h") -> go.Figu
     return fig
 
 
-def render_backtest_page(params: dict) -> None:
+def render_backtest_page(base_params: dict) -> None:
     """Page principale du backtest."""
+    from datetime import date as _date, timedelta as _td
+
     if resolve_polygon_key() is None:
         st.error(
             "Aucune clé Polygon trouvée. Place ta clé dans **polygon.key** à la racine du projet, "
@@ -401,10 +403,48 @@ def render_backtest_page(params: dict) -> None:
         )
         return
 
-    as_of: date | None = params.get("as_of")
-    if as_of is None:
-        st.error("Sélectionne une date d'entrée (as_of) dans la sidebar.")
-        return
+    # ── Inputs propres à la page Backtest ──────────────────────────────────
+    col_date, col_time, col_sym = st.columns([2, 2, 3])
+    with col_date:
+        max_as_of = _date.today() - _td(days=1)
+        min_as_of = _date.today() - _td(days=2 * 365)
+        default_as_of = max(min_as_of, min(max_as_of, _date(2026, 2, 5)))
+        as_of = st.date_input(
+            "Date d'entrée (as_of)",
+            value=default_as_of,
+            min_value=min_as_of,
+            max_value=max_as_of,
+            key="bt_as_of",
+            help="Massive (ex-Polygon) : 2 ans d'historique max.",
+        )
+    with col_time:
+        from data.provider_polygon import SCAN_TIME_OPTIONS
+        scan_time_label = st.selectbox(
+            "Heure du scan (ET)",
+            options=list(SCAN_TIME_OPTIONS.keys()),
+            index=1,
+            key="bt_scan_time_label",
+            help="Heure de la prise de prix en temps de marché (America/New_York).",
+        )
+        scan_time = SCAN_TIME_OPTIONS[scan_time_label]
+    with col_sym:
+        if "bt_symbols_input" not in st.session_state:
+            st.session_state["bt_symbols_input"] = "SPY"
+        raw = st.text_input(
+            "Sous-jacent(s)",
+            key="bt_symbols_input",
+            help="En backtest, seul le 1er ticker est utilisé.",
+            placeholder="SPY",
+        )
+        symbols = [s.strip().upper() for s in raw.split(",") if s.strip()]
+
+    params = {
+        **base_params,
+        "symbols": symbols,
+        "as_of": as_of,
+        "scan_time": scan_time,
+        "mode": "backtest",
+    }
 
     if "bt_results" not in st.session_state:
         st.session_state.bt_results = None
@@ -413,7 +453,6 @@ def render_backtest_page(params: dict) -> None:
     if "bt_selected_idx" not in st.session_state:
         st.session_state.bt_selected_idx = 0
 
-    scan_time  = params.get("scan_time")
     time_label = f" @ {scan_time} ET" if scan_time else " (close EOD)"
 
     # ── Saisie directe d'un combo (FEAT-021) ───────────────────────────────
@@ -472,6 +511,7 @@ def render_backtest_page(params: dict) -> None:
             st.session_state.bt_results = result
             st.session_state.bt_replay = None
             st.session_state.bt_selected_idx = 0
+            st.session_state["grid_page_bt"] = 0
         except Exception as exc:
             st.error(f"Erreur scan : {exc}")
             st.session_state.bt_results = None
@@ -516,16 +556,51 @@ def render_backtest_page(params: dict) -> None:
 
     st.markdown("---")
 
+    # ── Toggle vue grille / unique ─────────────────────────────────────────
+    from ui.page_live import _render_grid
+
+    if "view_mode_bt" not in st.session_state:
+        st.session_state["view_mode_bt"] = "Grille"
+
+    view_mode = st.radio(
+        "Affichage",
+        options=["Grille", "Vue unique"],
+        horizontal=True,
+        key="view_mode_bt",
+        label_visibility="collapsed",
+    )
+
+    st.markdown("---")
+
+    if view_mode == "Grille":
+        _render_grid(results, "bt", params)
+        # Le replay est disponible uniquement en vue unique
+        return
+
+    # ── Vue unique ─────────────────────────────────────────────────────────
     idx = st.session_state.bt_selected_idx
     combo = results["combinations"][idx]
     m = results["metrics"][idx]
     pnl_for_combo = results["pnl_per_combo"][idx]
+
+    symbols_list = results.get("symbols")
+    combo_symbol = symbols_list[idx] if symbols_list else results.get("symbol")
+    ticker_part = f" {combo_symbol}" if combo_symbol else ""
+    combo_name_std = " | ".join(
+        f"{'L' if leg.direction == 1 else 'S'}{leg.quantity} "
+        f"{leg.option_type}{ticker_part} "
+        f"{leg.expiration.strftime('%d%b%Y').upper()} "
+        f"{leg.strike:g}"
+        for leg in combo.legs
+    )
+    st.code(combo_name_std, language=None)
 
     fig = plot_pnl_profile(
         combination=combo, pnl_tensor=pnl_for_combo,
         spot_range=results["spot_ranges"][idx], current_spot=results["spots"][idx],
         loss_prob=m["loss_prob_pct"] / 100,
         max_loss_pct=m["max_loss_pct"], max_gain_pct=m["max_gain_pct"],
+        symbol=combo_symbol,
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -541,7 +616,7 @@ def render_backtest_page(params: dict) -> None:
 
     st.markdown("---")
     render_combo_detail(
-        combo, m, symbol=results.get("symbol"),
+        combo, m, symbol=combo_symbol,
         pnl_tensor=pnl_for_combo,
         spot_range=results["spot_ranges"][idx],
         current_spot=results["spots"][idx],
@@ -553,7 +628,6 @@ def render_backtest_page(params: dict) -> None:
     st.markdown("---")
     st.subheader("Replay historique")
 
-    # Clé unique par combo : force le défaut à se recalculer à chaque changement de combo
     default_days = max(5, min(60, (combo.close_date - as_of).days))
     slider_key = f"bt_days_{idx}_{combo.close_date}"
     days_forward = st.slider("Jours à replayer", 5, 60, default_days, 1, key=slider_key)
