@@ -1,13 +1,69 @@
 """Page Screener automatique de sous-jacents."""
 
+import threading
+
 import streamlit as st
 
 import config
 
+# État background du screener — survit aux changements de tab (module-level)
+_bg: dict = {
+    "running": False,
+    "progress": 0.0,
+    "status": "",
+    "results": None,
+    "error": None,
+}
+
+
+def _launch_screener(top_n: int, profile: str, include_high_vol: bool) -> None:
+    """Lance le screener dans un thread daemon (survit aux reruns Streamlit)."""
+    if _bg["running"]:
+        return
+    _bg.update({"running": True, "results": None, "error": None,
+                "progress": 0.0, "status": "Démarrage…"})
+
+    def _run() -> None:
+        from screener import UnderlyingScreener
+
+        def on_progress(pct: float, msg: str) -> None:
+            _bg["progress"] = pct / 100.0
+            _bg["status"] = msg
+
+        try:
+            screener = UnderlyingScreener()
+            results = screener.screen(
+                top_n=top_n,
+                profile=profile,
+                include_high_vol=include_high_vol,
+                progress_callback=on_progress,
+            )
+            _bg["results"] = results
+        except Exception as exc:
+            _bg["error"] = str(exc)
+        finally:
+            _bg["running"] = False
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+@st.fragment(run_every=1)
+def _progress_fragment() -> None:
+    """Polling 1 fois/seconde — affiche la progression et capte la fin du scan."""
+    if _bg["running"]:
+        st.progress(_bg["progress"], text=_bg["status"] or "En cours…")
+    elif _bg["results"] is not None:
+        st.session_state["screener_results"] = _bg["results"]
+        _bg["results"] = None
+        st.rerun()
+    elif _bg["error"] is not None:
+        err = _bg["error"]
+        _bg["error"] = None
+        st.error(f"Erreur screener : {err}")
+
 
 def render_screener_page() -> None:
     """Rend la page screener sous-jacents."""
-    from screener import UnderlyingScreener
     from screener.models import ScreenerResult
 
     st.header("🔎 Screener automatique de sous-jacents")
@@ -58,39 +114,25 @@ def render_screener_page() -> None:
         type="primary",
         use_container_width=False,
         key="run_screener",
+        disabled=_bg["running"],
     )
 
     if run_screener:
-        progress_bar = st.progress(0.0)
-        status_text = st.empty()
+        _launch_screener(top_n, profile, include_high_vol)
+        st.rerun()
 
-        def on_progress(pct: float, msg: str) -> None:
-            progress_bar.progress(min(pct / 100.0, 1.0))
-            status_text.caption(msg)
-
-        try:
-            screener = UnderlyingScreener()
-            results: list[ScreenerResult] = screener.screen(
-                top_n=top_n,
-                profile=profile,
-                include_high_vol=include_high_vol,
-                progress_callback=on_progress,
-            )
-            st.session_state["screener_results"] = results
-        except Exception as exc:
-            st.error(f"Erreur screener : {exc}")
-            st.session_state["screener_results"] = []
-        finally:
-            progress_bar.empty()
-            status_text.empty()
+    # Fragment de polling actif dès qu'un screener est en cours ou a terminé
+    if _bg["running"] or _bg["results"] is not None or _bg["error"] is not None:
+        _progress_fragment()
 
     results: list[ScreenerResult] = st.session_state.get("screener_results", [])
 
     if not results:
-        st.info(
-            "Lancez le screener pour trouver automatiquement les sous-jacents "
-            "les mieux adaptés à vos templates."
-        )
+        if not _bg["running"]:
+            st.info(
+                "Lancez le screener pour trouver automatiquement les sous-jacents "
+                "les mieux adaptés à vos templates."
+            )
         return
 
     n_disq = sum(1 for r in results if r.disqualification_reason)
@@ -99,7 +141,6 @@ def render_screener_page() -> None:
     else:
         st.success(f"✓ {len(results)} sous-jacent(s) trouvé(s)")
 
-    # Tableau résumé
     col_list, col_detail = st.columns([1, 2])
 
     with col_list:

@@ -597,6 +597,15 @@ def render_live_page(base_params: dict) -> None:
     if view_mode == "Grille":
         _render_grid(results, "live", params)
         st.markdown("---")
+        sel_tbl = render_results_table(
+            results["combinations"], results["metrics"],
+            results.get("symbols"),
+            spot=results["spots"][0] if results.get("spots") else None,
+        )
+        if sel_tbl is not None and sel_tbl != st.session_state.get("live_selected_idx", 0):
+            st.session_state["live_selected_idx"] = sel_tbl
+            st.rerun()
+        st.markdown("---")
         _render_grid_details_compact(results, "live_selected_idx", days_before_close=dbc)
     else:
         _render_single(results, "live_selected_idx", params, days_before_close=dbc)
