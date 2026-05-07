@@ -561,9 +561,12 @@
 - [x] ui/page_live.py — nouveau : page live avec run_scan + grid view
 - [x] ui/page_backtest.py — inputs date/ticker en haut ; grid view
 - [x] ui/app.py — routeur tabs (5 tabs)
-- [ ] docs/specs/option_scanner_spec_v2.md — mise à jour §UI + version FEAT-027
+- [x] docs/specs/option_scanner_spec_v2.md — mise à jour §8.1 + §8.2 + version FEAT-027
+- [x] Sélection grille → tableau : colonne ▶ dans render_results_table (selected_row param)
+- [x] Screener background thread + @st.fragment(run_every=1)
+- [x] Tableau en vue grille synchronisé avec mini-graphes
 - [ ] Test ANQA — navigation tabs + grid view + screener inject
-- [ ] Commit
+- [ ] Commit final validation
 
 ## FEAT-026b — Capital immobilisé + gain ±1σ en $ priorité #1
 

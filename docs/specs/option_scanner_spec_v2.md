@@ -971,15 +971,17 @@ Chaque ligne est cliquable pour afficher le graphique P&L détaillé.
 │  [Grille] [Vue unique]   ← toggle affiché à droite du résumé │
 │                                                               │
 │  Vue Grille (défaut) :                                        │
-│  ┌────────┬────────┬────────┬────────┬────────┬────────┐     │
-│  │#1 0.87 │#2 0.82 │#3 0.79 │#4 0.75 │#5 0.71 │#6 0.68 │    │
-│  │ [chart]│ [chart]│ [chart]│ [chart]│ [chart]│ [chart]│     │
-│  ├────────┼────────┼────────┼────────┼────────┼────────┤     │
-│  │ ... 4 lignes × 6 colonnes = 24 mini-graphes/page ...│     │
-│  └────────┴────────┴────────┴────────┴────────┴────────┘     │
+│  ┌─────────┬─────────┬─────────┬─────────┬─────────┬────────┐ │
+│  │ [chart] │ [chart] │ [chart] │ [chart] │ [chart] │[chart] │ │
+│  │[▶ #1·.87│ [ #2·.82│ [ #3·.79│ [ #4·.75│ [ #5·.71│ [#6·.68│ │
+│  ├─────────┴─────────┴─────────┴─────────┴─────────┴────────┤ │
+│  │   ... 4 lignes × 6 colonnes = 24 mini-graphes / page ...  │ │
+│  └───────────────────────────────────────────────────────────┘ │
 │  [◀ Préc.]  Résultats 1–24 / 47  [Suiv. ▶]                   │
+│  Tableau résultats (colonne ▶ = sélectionné)                  │
+│  Détails compacts (sans grand graphe)                         │
 │                                                               │
-│  Vue Unique : graphe P&L height=600px + tableau + détails     │
+│  Vue Unique : graphe P&L height=1200px + tableau + détails    │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -987,11 +989,16 @@ Chaque ligne est cliquable pour afficher le graphique P&L détaillé.
 
 1. L'utilisateur entre un ou plusieurs tickers dans l'onglet Live ou Backtest
 2. Clic sur "Lancer le scan" : chargement, combos, GPU, filtrage, tri par score
-3. Les résultats s'affichent en **vue grille par défaut** (4×6 mini-graphes)
-4. Navigation Préc./Suiv. pour parcourir les 24 suivants/précédents
-5. Clic sur "Sélectionner" sous un mini-graphe → vue unique pour ce combo
-6. Vue unique : graphe P&L + tableau résultats + détails combo + replay (backtest)
-7. Les paramètres du scan sont dans l'onglet **Paramètres** (templates, critères, vol, pricer, DTE, score weights)
+3. Résultats en **vue grille par défaut** (4×6 mini-graphes + boutons numérotés)
+4. Navigation Préc./Suiv. pour parcourir les 24 résultats suivants/précédents
+5. Clic sur le bouton sous un mini-graphe → sélectionne ce combo (bordure + ▶ tableau + détails compacts)
+6. Clic sur une ligne du tableau → sélectionne ce combo (synchronisation bidirectionnelle)
+7. La colonne `" "` du tableau affiche "▶" sur la ligne active — la sélection tableau ne peut pas être
+   modifiée programmatiquement en Streamlit, d'où cet indicateur visuel côté code
+8. Toggle "Vue unique" → graphe P&L height=1200px + tableau + détails complets
+9. Paramètres dans l'onglet **Paramètres** (templates, critères, vol, pricer, DTE, score weights)
+10. Screener sous-jacents : s'exécute dans un thread daemon Python — survit aux changements de tab ;
+    `@st.fragment(run_every=1)` affiche la progression et transfère les résultats en session_state à la fin
 
 **Panneau "Plan de sortie" (FEAT-010)** — affiché dans `combo_detail`, sous les
 4 métriques principales et au-dessus du tableau des legs. Les seuils sont

@@ -1,7 +1,8 @@
 # FEAT-027 — Réorganisation des pages (tabs + grille)
 
-**Status:** IN PROGRESS
-**Date:** 2026-05-07
+**Status:** IN PROGRESS  
+**Date:** 2026-05-07  
+**Dernière mise à jour:** 2026-05-07 (sélection tableau synchronisée + screener background)
 
 ## Context
 
@@ -43,10 +44,22 @@ Contient tout ce qui était dans la sidebar, sauf :
 - 4 lignes × 6 colonnes = 24 mini-graphes par page
 - Chaque mini-graphe : profil P&L simplifié, height=280px, use_container_width
 - Navigation : boutons "◀ Préc." et "Suiv. ▶" (24 résultats par page)
-- Défaut : vue grille
-- Toggle radio : "Grille" | "Vue unique"
-- Clic sur "Sélectionner" sous un mini-graphe → passe en vue unique pour ce combo
-- Vue unique : graphe principal height=600px (était 1680, réduit pour tenir dans la page)
+- Défaut : vue grille ; toggle radio "Grille" | "Vue unique"
+- Sélection via bouton numéroté sous chaque mini-graphe (fiable, pas de `on_select` Plotly)
+- Clic sur un bouton de mini-graphe → met à jour `selected_idx`, bordure + ▶ dans tableau + détails
+- Clic sur une ligne du tableau → met à jour `selected_idx`, même effet
+- Synchronisation tableau → grille : colonne `" "` affiche "▶" sur la ligne sélectionnée
+  (la sélection interne du `st.dataframe` ne peut pas être modifiée programmatiquement)
+- Vue grille : tableau des résultats + détails compacts (sans grand graphe) sous la grille
+- Vue unique : graphe P&L height=1200px + tableau + détails complets
+
+### Screener — persistance (thread background)
+- Le screener tourne dans un **thread Python daemon** (`threading.Thread`)
+- L'état est stocké dans un dict module-level `_bg` (survit aux reruns Streamlit)
+- Un `@st.fragment(run_every=1)` poll toutes les secondes pendant l'exécution
+- Changer de tab pendant le screener ne l'interrompt pas
+- Au retour sur la page Screener, les résultats s'affichent automatiquement si le scan a fini
+- Le bouton "Lancer" est désactivé (`disabled=True`) pendant l'exécution
 
 ## Technical spec
 

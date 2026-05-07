@@ -38,6 +38,7 @@ def render_results_table(
     symbols: list[str] | None = None,
     realistic_range_pct: float | None = None,
     spot: float | None = None,
+    selected_row: int | None = None,
 ) -> int | None:
     """
     Affiche le tableau des résultats triés par score décroissant.
@@ -61,8 +62,9 @@ def render_results_table(
             )
         legs_summary = " | ".join(legs_lines)
         days_lbl  = f"J-{m['days_to_close']}" if "days_to_close" in m else ""
-        row = {"Rang": i + 1}
+        row = {" ": "▶" if i == selected_row else ""}
         row.update({
+            "Rang": i + 1,
             "Template": combo.template_name,
             "Legs": legs_summary,
             "Net Debit ($)": f"{combo.net_debit:+,.0f}",
