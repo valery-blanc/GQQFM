@@ -1,13 +1,17 @@
-"""Score composite v2 (FEAT-026) — classement multi-critères des combinaisons.
+"""Score composite v2 (FEAT-026 + 026b) — classement multi-critères des combinaisons.
 
 Sept composants additifs normalisés min-max sur la population filtrée :
-  Score = w1 × norm(max_gain_real_pct)
+  Score = w1 × norm(max_gain_real_dollar)         # FEAT-026b : gain ±1σ EN $
         + w2 × norm(annualized_return_pct)
         + w3 × (1 − norm(loss_prob))
         + w4 × (1 − norm(|max_loss_pct|))
         + w5 × norm(liquidity_score)
-        + w6 × norm(vol_robustness)
-        + w7 × (1 − norm(slippage_pct))    # NaN remplacé par médiane
+        + w6 × (1 − norm(vol_dispersion_pct))
+        + w7 × (1 − norm(slippage_pct))           # NaN remplacé par médiane
+
+Le 1er composant utilise le **gain en dollars** (pas en %) : le rendement
+annualisé (composant 2) tient déjà compte du capital immobilisé via
+`max_gain_real_pct = gain / capital_required × 100`.
 
 Le multiplicateur événementiel (FEAT-005) reste appliqué en sortie :
   Score_final = Score × event_score_factor
@@ -64,7 +68,7 @@ def score_combinations(
     """
     w = weights.normalized()
 
-    s_gain = _normalize(metrics.max_gain_real_pct)
+    s_gain = _normalize(metrics.max_gain_real_dollar)
     s_ann = _normalize(metrics.annualized_return_pct)
     s_lp = 1.0 - _normalize(metrics.loss_prob)
     s_ml = 1.0 - _normalize(xp.abs(metrics.max_loss_pct))

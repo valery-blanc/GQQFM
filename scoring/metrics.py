@@ -1,18 +1,23 @@
-"""Calcul centralisé des métriques per-combo pour le scoring v2 (FEAT-026).
+"""Calcul centralisé des métriques per-combo pour le scoring v2 (FEAT-026 + 026b).
 
 Sept métriques sont calculées pour chaque combo filtré, puis combinées dans
 `scoring/scorer.py:score_combinations()` selon les poids `ScoreWeights` choisis
 par l'utilisateur.
 
+**FEAT-026b** : tous les pourcentages sont calculés sur `capital_required` =
+`max(|net_debit|, |max_loss|)` plutôt que sur `net_debit`. Raison : le net_debit
+sous-estime le capital effectivement immobilisé pour les structures avec shorts
+non couverts (calendar/double calendar) — le broker exige une marge ≥ max_loss.
+
 Métriques :
-  1. max_loss_pct          — perte max / net_debit × 100
-  2. max_gain_real_pct     — gain max dans la fenêtre ±1σ / net_debit × 100
+  1. max_loss_pct          — perte max / capital_required × 100
+  2. max_gain_real_pct     — gain max dans la fenêtre ±1σ / capital_required × 100
   3. annualized_return_pct — max_gain_real_pct × 365 / days_to_close
-  4. loss_prob             — probabilité de perte (lognormale, FEAT-026 globale)
+  4. loss_prob             — probabilité de perte (lognormale, globale)
   5. liquidity_score       — min(volume × open_interest) sur les legs
   6. vol_dispersion_pct    — dispersion P&L à spot=courant entre les V scénarios
-                             de vol, en % du net_debit (plus bas = plus robuste)
-  7. slippage_pct          — Σ((ask−bid) × qty × 100) / net_debit
+                             de vol, en % du capital_required (plus bas = plus robuste)
+  7. slippage_pct          — Σ((ask−bid) × qty × 100) / capital_required
                              NaN si bid/ask manquants pour au moins une leg
 """
 
@@ -48,6 +53,7 @@ class ComboMetricsBatch:
     daily_gain_dollar: "xp.ndarray"
     realistic_range_pct: "xp.ndarray"
     atm_vol_per_combo: "xp.ndarray"
+    capital_required: "xp.ndarray"
 
 
 def compute_combo_metrics(
@@ -80,15 +86,18 @@ def compute_combo_metrics(
     pnl_mid = pnl_tensor[config.VOL_MEDIAN_INDEX]
     n_combos = pnl_mid.shape[0]
 
-    safe_debits = xp.where(
-        xp.abs(net_debits) < 1.0,
-        xp.ones_like(net_debits),
-        xp.abs(net_debits),
-    )
+    max_loss = pnl_mid.min(axis=1)
+
+    # FEAT-026b : capital effectivement immobilisé.
+    # Pour les calendars/double calendars, les shorts génèrent une marge broker
+    # ≥ max_loss, supérieure au net_debit (qui sous-estime le capital bloqué).
+    capital_required = xp.maximum(xp.abs(net_debits), xp.abs(max_loss))
+    capital_required = xp.where(capital_required < 1.0, xp.ones_like(capital_required),
+                                capital_required)
 
     pnl_mid_cpu = to_cpu(pnl_mid)
     spot_range_cpu = to_cpu(spot_range)
-    net_debits_cpu = to_cpu(net_debits)
+    capital_required_cpu = to_cpu(capital_required)
 
     max_gain_real_arr = np.empty(n_combos, dtype=np.float32)
     days_arr = np.empty(n_combos, dtype=np.float32)
@@ -127,8 +136,7 @@ def compute_combo_metrics(
                 (leg.ask - leg.bid) * leg.quantity * 100
                 for leg in combo.legs
             )
-            nd_abs = abs(float(net_debits_cpu[i]))
-            denom = nd_abs if nd_abs > 1.0 else 1.0
+            denom = float(capital_required_cpu[i])
             slippage_arr[i] = float(spread_dollar / denom * 100.0)
 
     max_gain_real = to_xp(max_gain_real_arr)
@@ -138,9 +146,8 @@ def compute_combo_metrics(
     realistic_range = to_xp(range_arr)
     atm_vol_per_combo = to_xp(atm_vol_arr)
 
-    max_loss = pnl_mid.min(axis=1)
-    max_loss_pct = max_loss / safe_debits * 100.0
-    max_gain_real_pct = max_gain_real / safe_debits * 100.0
+    max_loss_pct = max_loss / capital_required * 100.0
+    max_gain_real_pct = max_gain_real / capital_required * 100.0
     annualized_return_pct = max_gain_real_pct * (365.0 / xp.maximum(days_to_close, 1.0))
     daily_gain_dollar = max_gain_real / xp.maximum(days_to_close, 1.0)
 
@@ -152,7 +159,7 @@ def compute_combo_metrics(
     idx_spot0 = int(xp.argmin(xp.abs(spot_range - current_spot)).item())
     pnl_at_spot0 = pnl_tensor[:, :, idx_spot0]
     pnl_std = pnl_at_spot0.std(axis=0)
-    vol_dispersion_pct = pnl_std / safe_debits * 100.0
+    vol_dispersion_pct = pnl_std / capital_required * 100.0
 
     return ComboMetricsBatch(
         max_loss_pct=max_loss_pct,
@@ -168,4 +175,5 @@ def compute_combo_metrics(
         daily_gain_dollar=daily_gain_dollar,
         realistic_range_pct=realistic_range,
         atm_vol_per_combo=atm_vol_per_combo,
+        capital_required=capital_required,
     )

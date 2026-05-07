@@ -1,6 +1,6 @@
 # FEAT-026 — Score composite v2 : ranking multi-critères réaliste
 
-**Statut :** IMPLÉMENTÉ — en attente validation Val (test ANQA)
+**Statut :** IMPLÉMENTÉ + FEAT-026b — en attente validation Val (test ANQA)
 **Date :** 2026-05-07
 
 ## Contexte
@@ -161,3 +161,68 @@ renormalise systématiquement à somme=1.
 - Les 3 anciennes constantes `SCORE_WEIGHT_*` sont supprimées de `config.py`. Aucun
   fichier en dehors de `scoring/scorer.py` ne les utilisait (vérifié par `grep`).
 - Le multiplicateur événementiel `event_score_factor` (FEAT-005) est conservé tel quel.
+
+---
+
+## FEAT-026b — capital immobilisé + gain $ priorité #1
+
+**Date :** 2026-05-07 (suite directe de FEAT-026)
+
+### Motivation
+
+Le `net_debit` représente le **cash sorti** à l'ouverture du combo. Pour les
+structures avec shorts non couverts (calendar / double calendar), le **broker
+exige une marge** ≥ |max_loss| qui peut largement dépasser net_debit.
+
+Conséquence sur le scoring v1 et FEAT-026 (avant 026b) : les calendars apparaissent
+artificiellement plus rentables (rendement = gain / petit débit) alors que la
+banque immobilise davantage.
+
+### Changements
+
+**1. Capital immobilisé** = `max(|net_debit|, |max_loss|)`. Approximation
+universelle de la marge broker (utilisée dans la plupart des screeners).
+Stockée dans `ComboMetricsBatch.capital_required`.
+
+**2. Tous les % sont divisés par capital_required** au lieu de `net_debit` :
+- `max_loss_pct`, `max_gain_real_pct`, `max_gain_pct`
+- `annualized_return_pct` (= `max_gain_real_pct × 365 / days`)
+- `vol_dispersion_pct`, `slippage_pct`
+
+Pour reverse iron condor (max_loss = net_debit) : aucun changement de comportement.
+Pour calendar / double calendar : le rendement effectif est revu à la baisse.
+
+**3. Premier composant du score = `max_gain_real_dollar`** (en $) au lieu de
+`max_gain_real_pct`. Le rendement annualisé (composant 2) tient déjà compte du
+capital immobilisé via le %, donc la dimension du composant 1 doit être absolue
+pour ne pas faire double emploi.
+
+```python
+# Avant FEAT-026b
+s_gain = _normalize(metrics.max_gain_real_pct)       # %
+
+# Après FEAT-026b
+s_gain = _normalize(metrics.max_gain_real_dollar)    # $
+```
+
+**4. UI** :
+- `combo_detail.py` : carte "Capital immobilisé" ajoutée à côté de "Net Debit"
+  (5 colonnes au lieu de 4).
+- `results_table.py` : legend mise à jour pour préciser que les % sont sur
+  capital_required.
+- `sidebar.py` : labels des sliders adaptés ("Gain max ±1σ ($)" pour le 1er,
+  "Rendement annualisé (%)" pour le 2e).
+- `combo_parser.py` (saisie directe) : calcul de `capital_required` ajouté.
+
+### Fichiers touchés (FEAT-026b)
+
+| Fichier | Action |
+|---|---|
+| `scoring/metrics.py` | Ajout `capital_required` à `ComboMetricsBatch` ; tous les % divisés par `capital_required` |
+| `scoring/scorer.py` | 1er composant = `max_gain_real_dollar` (en $) |
+| `ui/app.py` | Lecture `capital_required` ; remplacement de `nd` par `cap_req` dans la boucle metrics |
+| `ui/page_backtest.py` | Idem |
+| `ui/combo_parser.py` | `capital_required = max(|net_debit|, |max_loss|)` ; `nd = capital_required` |
+| `ui/components/combo_detail.py` | Carte "Capital immobilisé" + adaptation `_render_exit_plan` |
+| `ui/components/sidebar.py` | Labels sliders adaptés |
+| `ui/components/results_table.py` | Legend mise à jour |

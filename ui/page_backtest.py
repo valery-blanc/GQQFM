@@ -165,6 +165,7 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
     max_loss_dollar_cpu = to_cpu(metrics_batch.max_loss_dollar)
     daily_gain_cpu = to_cpu(metrics_batch.daily_gain_dollar)
     realistic_range_cpu = to_cpu(metrics_batch.realistic_range_pct)
+    capital_required_cpu = to_cpu(metrics_batch.capital_required)
 
     metrics = []
     for i in range(len(filtered_combos)):
@@ -172,12 +173,12 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
         max_gain_d = float(pnl_mid_cpu[i].max())
         max_gain_real_d = float(max_gain_real_dollar_cpu[i])
         nd_raw = float(safe_debits[i])
-        nd = abs(nd_raw) if abs(nd_raw) > 1.0 else 1e-6
+        cap_req = float(capital_required_cpu[i])
 
         metrics.append({
             "max_loss_pct":         float(max_loss_pct_cpu[i]),
             "loss_prob_pct":        float(loss_prob_cpu[i]) * 100,
-            "max_gain_pct":         max_gain_d / nd * 100,
+            "max_gain_pct":         max_gain_d / cap_req * 100,
             "max_gain_real_pct":    float(max_gain_real_pct_cpu[i]),
             "annualized_return_pct": float(annualized_pct_cpu[i]),
             "liquidity_score":      float(liquidity_cpu[i]),
@@ -187,6 +188,7 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
             "score":                float(scores_cpu[i]),
             "realistic_range_pct":  float(realistic_range_cpu[i]),
             "max_gain_real_dollar": max_gain_real_d,
+            "capital_required":     cap_req,
             "days_to_close":        int(days_close_cpu[i]),
             "daily_gain_dollar":    float(daily_gain_cpu[i]),
         })

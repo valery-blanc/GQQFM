@@ -95,18 +95,20 @@ def render_results_table(
         lo = spot * (1 - range_pct / 100)
         hi = spot * (1 + range_pct / 100)
         st.caption(
-            f"fenêtre ±1σ (top combo) = $[{lo:,.0f}, {hi:,.0f}],  σ = {range_pct:.1f}%  ·  "
-            "Gain ±1σ % = gain max dans cette fenêtre / net_debit  ·  "
-            "Gain ±1σ $ = valeur absolue  ·  $/j = gain $ / jours jusqu'à J-3 short  ·  "
-            "% / an = annualisé  ·  Liq. = min(volume × OI)  ·  "
-            "Disp. vol = écart-type P&L au spot ÷ net_debit  ·  Slipp. = Σ(ask−bid)/net_debit"
+            f"fenêtre ±1σ (top combo) = $[{lo:,.0f}, {hi:,.0f}], σ = {range_pct:.1f}% · "
+            "**Tous les % sont calculés sur le capital immobilisé** = max(|net_debit|, |perte max|) "
+            "— couvre la marge des shorts (FEAT-026b). · "
+            "Gain ±1σ $ = valeur absolue · $/j = gain $ / jours jusqu'à J-3 short · "
+            "% / an = annualisé · Liq. = min(volume × OI) · "
+            "Disp. vol = std(P&L) au spot / capital · Slipp. = Σ(ask−bid) / capital"
         )
     else:
         st.caption(
-            "Gain ±1σ % = gain max dans la fenêtre ±1σ de chaque combo (IV ATM × √(J/365)) / net_debit · "
+            "**% calculés sur le capital immobilisé** = max(|net_debit|, |perte max|) (FEAT-026b). · "
+            "Gain ±1σ % = gain dans la fenêtre ±1σ / capital · "
             "Gain ±1σ $ = valeur absolue · $/j = gain $ / jours jusqu'à J-3 short · "
             "% / an = annualisé · Liq. = min(volume × OI) · "
-            "Disp. vol = écart-type P&L spot / net_debit · Slipp. = Σ(ask−bid)/net_debit"
+            "Disp. vol = std(P&L) au spot / capital · Slipp. = Σ(ask−bid) / capital"
         )
 
     # Police réduite pour le tableau (notamment la colonne Legs multi-lignes)

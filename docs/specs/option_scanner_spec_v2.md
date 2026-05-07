@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-026 (2026-05-07)
+> Version : FEAT-026 + 026b (2026-05-07)
 
 ## 1. Vue d'ensemble
 
@@ -828,13 +828,18 @@ Métriques per-combo (BUG-022 — post-filtrage, boucle Python) :
 - `nd` = `abs(net_debit)` (évite inversion de signe sur spreads à crédit)
 - Colonnes additionnelles : `Gain ±1σ $`, `$/j` (gain par jour jusqu'à J-3 short)
 
-### 6.4 Scoring pour le classement des résultats — FEAT-026
+### 6.4 Scoring pour le classement des résultats — FEAT-026 + 026b
 
 Les combinaisons qui passent le filtre sont classées par un **score composite à 7
 composants additifs** normalisés min-max sur la population filtrée.
 
 Les **poids sont ajustables dans la sidebar Streamlit** via 7 sliders (expander
 "⚖️ Pondération du score (avancé)") et persistés via `st.session_state`.
+
+**FEAT-026b** : tous les pourcentages sont calculés sur le **capital immobilisé** =
+`max(|net_debit|, |max_loss|)` (et non sur `net_debit`), pour refléter la marge
+réellement bloquée par le broker (notamment sur les calendars/double calendars où
+les shorts non couverts génèrent une marge ≥ |max_loss|).
 
 ```python
 def score_combinations(
@@ -843,13 +848,13 @@ def score_combinations(
     event_score_factors: xp.ndarray | None = None,
 ) -> xp.ndarray:
     """
-    Score = w1 × norm(max_gain_real_pct)         # gain ±1σ — priorité #1
-          + w2 × norm(annualized_return_pct)      # gain × 365 / days_to_close
+    Score = w1 × norm(max_gain_real_dollar)      # FEAT-026b : gain ±1σ EN $
+          + w2 × norm(annualized_return_pct)      # gain × 365 / days_to_close (en %)
           + w3 × (1 − norm(loss_prob))            # 1 − proba perte (lognormale)
-          + w4 × (1 − norm(|max_loss_pct|))       # 1 − perte max %
+          + w4 × (1 − norm(|max_loss_pct|))       # 1 − perte max % du capital_required
           + w5 × norm(liquidity_score)            # min(volume × OI) sur les legs
           + w6 × (1 − norm(vol_dispersion_pct))   # robustesse aux scénarios de vol
-          + w7 × (1 − norm(slippage_pct))         # 1 − Σ(ask−bid) / net_debit
+          + w7 × (1 − norm(slippage_pct))         # 1 − Σ(ask−bid) / capital_required
 
     Score_final = Score × event_score_factor      # FEAT-005, conservé
 
@@ -857,6 +862,10 @@ def score_combinations(
       w1=0.25, w2=0.20, w3=0.15, w4=0.10, w5=0.10, w6=0.10, w7=0.10
     """
 ```
+
+Le **1er composant** est en **dollars** (pas en %). Raison : le composant 2
+(rendement annualisé) tient déjà compte du capital immobilisé via le ratio,
+donc le composant 1 doit être absolu pour ne pas faire double emploi.
 
 **Métriques calculées per-combo** dans `scoring/metrics.py` (`compute_combo_metrics`) :
 

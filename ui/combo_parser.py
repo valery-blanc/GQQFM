@@ -222,7 +222,7 @@ def build_single_combo_results(
     pnl_mid        = pnl_for_combo[config.VOL_MEDIAN_INDEX]     # (M,) CPU
 
     raw_nd = combination.net_debit
-    nd = abs(raw_nd) if abs(raw_nd) > 1.0 else None  # None = % non fiable
+    nd_abs = abs(raw_nd)
 
     today = as_of or date.today()
     days_i = max(1, (combination.close_date - today).days)
@@ -236,18 +236,21 @@ def build_single_combo_results(
     max_gain      = float(pnl_mid.max())
     max_gain_real = float(pnl_mid[real_mask].max()) if real_mask.any() else max_gain
 
+    # FEAT-026b : capital_required = max(|net_debit|, |max_loss|)
+    capital_required = max(nd_abs, abs(max_loss))
+    nd = capital_required if capital_required > 1.0 else 1.0
+
     # Probabilité de perte (distribution log-normale, même calcul que le scan)
     loss_prob = float(to_cpu(compute_loss_probability(
         pnl_mid_gpu, spot_range, spot, atm_vol, days_i, rfr,
     ))[0])
 
     warnings: list[str] = []
-    if not nd:
+    if nd_abs < 1.0 and abs(max_loss) < 1.0:
         warnings.append(
             f"Net debit = {raw_nd:+.2f}$ (proche de zéro ou crédit) — "
             "métriques en % peu fiables, affichage en dollars."
         )
-        nd = 1.0
 
     if any(l.bid is None or l.ask is None for l in combination.legs):
         slippage_pct_val = float("nan")
@@ -276,6 +279,7 @@ def build_single_combo_results(
         "score":                 0.0,
         "realistic_range_pct":   realistic_range_pct,
         "max_gain_real_dollar":  max_gain_real,
+        "capital_required":      capital_required,
         "days_to_close":         days_i,
         "daily_gain_dollar":     max_gain_real / days_i,
         "_atm_vol_pct":          f"{atm_vol*100:.2f}%",

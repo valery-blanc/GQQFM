@@ -547,6 +547,21 @@
 - [x] ui/components/results_table.py — colonnes `% / an`, `Liq.`, `Disp. vol`, `Slipp.`
 - [x] docs/specs/FEAT-026-score-composite-v2.md — spec complète
 - [x] docs/specs/option_scanner_spec_v2.md — §6.4 mis à jour + version FEAT-026
-- [ ] Test non-régression `tests/test_scan_vs_direct.py` — diff = $0.00
+- [x] Test non-régression `tests/test_scan_vs_direct.py` — DIAG_COMPARE_OK ratio < 2x
+- [x] Commit fa3d88d + 42e6b5d (test fix)
 - [ ] Test ANQA — ranking + sliders + fallback bid/ask manquants
-- [ ] Commit (code + docs + TASKS.md)
+
+## FEAT-026b — Capital immobilisé + gain ±1σ en $ priorité #1
+
+- [x] scoring/metrics.py — ajout `capital_required = max(|net_debit|, |max_loss|)`
+- [x] scoring/metrics.py — tous les % divisés par `capital_required` (max_loss_pct, max_gain_real_pct, slippage_pct, vol_dispersion_pct)
+- [x] scoring/scorer.py — 1er composant = `max_gain_real_dollar` (en $) au lieu de `max_gain_real_pct`
+- [x] ui/app.py + ui/page_backtest.py — lecture `capital_required` depuis ComboMetricsBatch + dict metrics
+- [x] ui/combo_parser.py — `capital_required` calculé en saisie directe
+- [x] ui/components/combo_detail.py — carte "Capital immobilisé" affichée à côté de Net Debit (5 colonnes au lieu de 4)
+- [x] ui/components/results_table.py — legend mise à jour (% sur capital_required)
+- [x] ui/components/sidebar.py — labels sliders : "Gain max ±1σ ($)" / "Rendement annualisé (%)"
+- [x] docs/specs/FEAT-026-score-composite-v2.md — section FEAT-026b ajoutée
+- [x] docs/specs/option_scanner_spec_v2.md — §6.4 mis à jour
+- [ ] Test ANQA — vérifier carte "Capital immobilisé" visible + classement correct
+- [ ] Commit final + déploiement ANQA

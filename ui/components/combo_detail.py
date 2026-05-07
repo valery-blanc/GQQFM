@@ -24,6 +24,12 @@ def _render_exit_plan(
     if net_debit <= 0:
         return
 
+    # FEAT-026b : capital_required = base des % (couvre la marge des shorts)
+    cap_req = metrics.get(
+        "capital_required",
+        max(abs(net_debit), abs(metrics.get("_max_loss_dollar", net_debit))),
+    )
+
     # Target réaliste : max P&L observé si le spot reste dans ±3 % (vol médiane)
     pnl_mid = pnl_tensor[1]
     pct_change = spot_range / current_spot - 1.0
@@ -32,11 +38,11 @@ def _render_exit_plan(
         target_dollar = float(pnl_mid[in_range].max())
     else:
         target_dollar = float(pnl_mid.max())
-    target_pct = target_dollar / net_debit * 100
+    target_pct = target_dollar / cap_req * 100
 
     # Stop loss = perte max structurelle (déjà calculée par le scanner)
     max_loss_pct = metrics["max_loss_pct"]   # négatif
-    stop_dollar = max_loss_pct / 100 * net_debit
+    stop_dollar = max_loss_pct / 100 * cap_req
 
     deadline = combination.close_date - timedelta(days=days_before_close)
     days_left = (deadline - (as_of or date.today())).days
@@ -125,11 +131,21 @@ def render_combo_detail(
 
     gain_real = metrics.get("max_gain_real_pct", metrics.get("max_gain_pct", 0))
     gain_abs  = metrics.get("max_gain_pct", 0)
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Net Debit", f"${combination.net_debit:,.0f}")
-    col2.metric("Perte max", f"{metrics['max_loss_pct']:.1f}%")
-    col3.metric("Proba perte", f"{metrics['loss_prob_pct']:.1f}%")
-    col4.metric("Gain ±1σ", f"{gain_real:.1f}%",
+    cap_req   = metrics.get(
+        "capital_required",
+        max(abs(combination.net_debit),
+            abs(metrics.get("_max_loss_dollar", combination.net_debit))),
+    )
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Net Debit", f"${combination.net_debit:,.0f}",
+                help="Cash sorti (ou rentré si crédit) à l'ouverture du combo.")
+    col2.metric("Capital immobilisé", f"${cap_req:,.0f}",
+                help="max(|net_debit|, |perte max|). Approxime la marge réellement "
+                     "bloquée par le broker — base de calcul des % du capital. FEAT-026b.")
+    col3.metric("Perte max", f"{metrics['max_loss_pct']:.1f}%")
+    col4.metric("Proba perte", f"{metrics['loss_prob_pct']:.1f}%")
+    col5.metric("Gain ±1σ", f"{gain_real:.1f}%",
                 delta=f"max absolu {gain_abs:.0f}%", delta_color="off")
 
     st.caption(f"Template : `{combination.template_name}` — Clôture prévue : {combination.close_date}")

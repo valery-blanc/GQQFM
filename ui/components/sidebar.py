@@ -13,10 +13,10 @@ from templates import ALL_TEMPLATES
 
 
 _WEIGHT_FIELDS = [
-    ("w_gain_real",   "Gain max ±1σ",            "Gain max réaliste dans la fenêtre ±1σ (priorité #1)."),
-    ("w_annualized",  "Rendement annualisé",     "Gain max ±1σ × 365 / days_to_close — combine durée et rendement."),
+    ("w_gain_real",   "Gain max ±1σ ($)",        "Gain max réaliste en dollars dans la fenêtre ±1σ — priorité #1. FEAT-026b : en $ (pas en %) car le rendement annualisé tient déjà compte du capital immobilisé."),
+    ("w_annualized",  "Rendement annualisé (%)", "max_gain_real / capital_immobilisé × 365 / days_to_close. Capital_immobilisé = max(|net_debit|, |perte max|)."),
     ("w_loss_prob",   "Sécurité — proba perte",  "Récompense les combos avec faible probabilité de perte (lognormale)."),
-    ("w_max_loss",    "Sécurité — perte max %",  "Récompense les combos avec faible perte max en % du capital."),
+    ("w_max_loss",    "Sécurité — perte max %",  "Récompense les combos avec faible perte max % du capital immobilisé."),
     ("w_liquidity",   "Liquidité",               "min(volume × open_interest) sur les legs — exécutabilité réelle."),
     ("w_robustness",  "Robustesse à la vol",     "Stabilité du P&L au spot courant entre les scénarios de vol."),
     ("w_slippage",    "Slippage (bid/ask)",      "Pénalité spread bid/ask. Neutre (médiane) si données absentes."),
