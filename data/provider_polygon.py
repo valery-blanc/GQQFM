@@ -81,13 +81,14 @@ class PolygonHistoricalProvider:
       - ^IRX historique utilisé pour le taux sans risque au jour de la simulation
     """
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(self, api_key: str | None = None, default_timeout: int = 60) -> None:
         self._api_key = resolve_polygon_key(api_key)
         if not self._api_key:
             raise RuntimeError(
                 "Clé Polygon/Massive introuvable. Mets-la dans polygon.key ou env POLYGON_API_KEY."
             )
         self._last_call_ts: float = 0.0
+        self._default_timeout: int = default_timeout
 
     # ── HTTP ────────────────────────────────────────────────────────────────
 
@@ -110,12 +111,13 @@ class PolygonHistoricalProvider:
         self._throttle()
         params["apiKey"] = self._api_key
         url = f"{POLYGON_BASE_URL}{path}"
-        resp = requests.get(url, params=params, timeout=60)
+        t = self._default_timeout
+        resp = requests.get(url, params=params, timeout=t)
         if resp.status_code == 429:
             logger.warning("Polygon 429 — wait %.0fs and retry", _RATE_LIMIT_RETRY_SECONDS)
             time.sleep(_RATE_LIMIT_RETRY_SECONDS)
             self._last_call_ts = time.time()
-            resp = requests.get(url, params=params, timeout=60)
+            resp = requests.get(url, params=params, timeout=t)
         resp.raise_for_status()
         data = resp.json()
 
@@ -133,11 +135,12 @@ class PolygonHistoricalProvider:
         self._throttle()
         sep = "&" if "?" in url else "?"
         full_url = f"{url}{sep}apiKey={self._api_key}"
-        resp = requests.get(full_url, timeout=60)
+        t = self._default_timeout
+        resp = requests.get(full_url, timeout=t)
         if resp.status_code == 429:
             logger.warning("Polygon 429 (cursor) — wait %.0fs and retry", _RATE_LIMIT_RETRY_SECONDS)
             time.sleep(_RATE_LIMIT_RETRY_SECONDS)
-            resp = requests.get(full_url, timeout=60)
+            resp = requests.get(full_url, timeout=t)
         resp.raise_for_status()
         data = resp.json()
         cache_polygon.set(cache_key, data)
