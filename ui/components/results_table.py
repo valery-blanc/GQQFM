@@ -1,9 +1,35 @@
 """Tableau comparatif des résultats."""
 
+import math
+
 import pandas as pd
 import streamlit as st
 
 from data.models import Combination
+
+
+def _fmt_liquidity(val: float) -> str:
+    """Format compact pour volume × OI : 42, 1.2k, 35M."""
+    if val <= 0:
+        return "—"
+    if val >= 1_000_000:
+        return f"{val / 1_000_000:.1f}M"
+    if val >= 1_000:
+        return f"{val / 1_000:.1f}k"
+    return f"{val:.0f}"
+
+
+def _fmt_annualized(pct: float) -> str:
+    """Affiche le rendement annualisé : >999% → multiplicateur ×, sinon %."""
+    if abs(pct) > 999:
+        return f"{pct / 100:+.1f}×"
+    return f"{pct:+.0f}%"
+
+
+def _fmt_slippage(pct: float) -> str:
+    if math.isnan(pct):
+        return "—"
+    return f"{pct:.1f}%"
 
 
 def render_results_table(
@@ -45,6 +71,10 @@ def render_results_table(
             "Gain ±1σ %": f"{m.get('max_gain_real_pct', m['max_gain_pct']):.1f}%",
             "Gain ±1σ $": f"${m.get('max_gain_real_dollar', 0):+,.0f}",
             "$/j": f"${m.get('daily_gain_dollar', 0):+,.1f}" if days_lbl else "—",
+            "% / an": _fmt_annualized(m.get("annualized_return_pct", 0.0)),
+            "Liq.": _fmt_liquidity(m.get("liquidity_score", 0.0)),
+            "Disp. vol": f"{m.get('vol_dispersion_pct', 0.0):.1f}%",
+            "Slipp.": _fmt_slippage(m.get("slippage_pct", float('nan'))),
             "Ratio G/L": f"{m['gain_loss_ratio']:.2f}",
             "Score": f"{m['score']:.3f}",
         })
@@ -67,12 +97,16 @@ def render_results_table(
         st.caption(
             f"fenêtre ±1σ (top combo) = $[{lo:,.0f}, {hi:,.0f}],  σ = {range_pct:.1f}%  ·  "
             "Gain ±1σ % = gain max dans cette fenêtre / net_debit  ·  "
-            "Gain ±1σ $ = valeur absolue  ·  $/j = gain $ / jours jusqu'à J-3 short"
+            "Gain ±1σ $ = valeur absolue  ·  $/j = gain $ / jours jusqu'à J-3 short  ·  "
+            "% / an = annualisé  ·  Liq. = min(volume × OI)  ·  "
+            "Disp. vol = écart-type P&L au spot ÷ net_debit  ·  Slipp. = Σ(ask−bid)/net_debit"
         )
     else:
         st.caption(
             "Gain ±1σ % = gain max dans la fenêtre ±1σ de chaque combo (IV ATM × √(J/365)) / net_debit · "
-            "Gain ±1σ $ = valeur absolue · $/j = gain $ / jours jusqu'à J-3 short"
+            "Gain ±1σ $ = valeur absolue · $/j = gain $ / jours jusqu'à J-3 short · "
+            "% / an = annualisé · Liq. = min(volume × OI) · "
+            "Disp. vol = écart-type P&L spot / net_debit · Slipp. = Σ(ask−bid)/net_debit"
         )
 
     # Police réduite pour le tableau (notamment la colonne Legs multi-lignes)

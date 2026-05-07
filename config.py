@@ -1,5 +1,7 @@
 """Configuration globale et constantes."""
 
+from dataclasses import dataclass, asdict
+
 # Taux sans risque (V1 : constante, V2 : fetch ^IRX)
 DEFAULT_RISK_FREE_RATE: float = 0.045  # 4.5%
 
@@ -29,10 +31,28 @@ GPU_SAFETY_FACTOR: float = 2.5
 # Nombre max de combinaisons générées par template
 MAX_COMBINATIONS: int = 500_000
 
-# Scoring weights
-SCORE_WEIGHT_GAIN_LOSS_RATIO: float = 0.4
-SCORE_WEIGHT_LOSS_PROB: float = 0.3
-SCORE_WEIGHT_EXPECTED_RETURN: float = 0.3
+# ── Scoring weights — FEAT-026 (score composite v2) ────────────────────────────
+# 7 composants additifs normalisés min-max sur la population filtrée.
+# Modifiables dans l'UI (sidebar) via st.session_state["score_weights"].
+@dataclass
+class ScoreWeights:
+    w_gain_real: float = 0.25     # gain max ±1σ — priorité #1 utilisateur
+    w_annualized: float = 0.20    # rendement %/an = max_gain_real_pct × 365 / days
+    w_loss_prob: float = 0.15     # 1 − probabilité de perte (lognormale)
+    w_max_loss: float = 0.10      # 1 − |perte max %| (sécurité worst-case)
+    w_liquidity: float = 0.10     # min(volume × OI) sur les legs
+    w_robustness: float = 0.10    # robustesse aux scénarios de vol
+    w_slippage: float = 0.10      # 1 − Σ(ask−bid) / net_debit (NaN-safe)
+
+    def normalized(self) -> "ScoreWeights":
+        """Renormalise les poids pour que la somme soit 1.0."""
+        total = sum(asdict(self).values())
+        if total <= 0:
+            raise ValueError("La somme des poids du score doit être > 0")
+        return ScoreWeights(**{k: v / total for k, v in asdict(self).items()})
+
+
+SCORE_WEIGHTS_DEFAULT = ScoreWeights()
 
 # ── Screener ──
 SCREENER_MIN_PRICE: float = 50.0

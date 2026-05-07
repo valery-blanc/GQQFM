@@ -532,3 +532,21 @@
 - [x] ui/components/results_table.py — param `spot`, affichage `fenêtre ±1σ = $[lo, hi], σ = x%`, nom colonne fixe `Gain ±1σ %`
 - [x] ui/app.py — `st.code(combo_name_std)` copier-coller, passe `symbol` et `spot`
 - [x] docs/specs/FEAT-025-chart-title-sigma-window.md
+
+## FEAT-026 — Score composite v2 (ranking multi-critères, poids modifiables UI)
+
+- [x] data/models.py — ajout `bid: float | None = None` et `ask: float | None = None` à `Leg`
+- [x] engine/combinator.py — propagation `bid`/`ask` depuis `OptionContract` vers `Leg`
+- [x] ui/combo_parser.py — propagation bid/ask en saisie directe live + champ slippage_pct au dict metrics
+- [x] scoring/metrics.py — **nouveau** : `compute_combo_metrics()` centralise les 7 métriques per-combo
+- [x] scoring/scorer.py — réécrit avec 7 composants additifs normalisés ; suppression `_compute_expected_return()`
+- [x] config.py — dataclass `ScoreWeights` + `SCORE_WEIGHTS_DEFAULT` ; suppression des 3 `SCORE_WEIGHT_*`
+- [x] ui/components/sidebar.py — expander "⚖️ Pondération du score (avancé)" avec 7 sliders + bouton Réinitialiser
+- [x] ui/app.py — lecture `score_weights` depuis params, appel `compute_combo_metrics`, nouveaux champs metrics
+- [x] ui/page_backtest.py — idem mode backtest
+- [x] ui/components/results_table.py — colonnes `% / an`, `Liq.`, `Disp. vol`, `Slipp.`
+- [x] docs/specs/FEAT-026-score-composite-v2.md — spec complète
+- [x] docs/specs/option_scanner_spec_v2.md — §6.4 mis à jour + version FEAT-026
+- [ ] Test non-régression `tests/test_scan_vs_direct.py` — diff = $0.00
+- [ ] Test ANQA — ranking + sliders + fallback bid/ask manquants
+- [ ] Commit (code + docs + TASKS.md)

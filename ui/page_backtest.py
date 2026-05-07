@@ -17,6 +17,7 @@ from engine.backend import to_cpu, xp
 from engine.combinator import generate_combinations
 from engine.pnl import combinations_to_tensor, compute_pnl_batch
 from scoring.filters import filter_combinations, realistic_max_gain
+from scoring.metrics import compute_combo_metrics
 from scoring.probability import compute_loss_probability
 from scoring.scorer import score_combinations
 from templates import ALL_TEMPLATES
@@ -136,52 +137,58 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
     net_debits_f = net_debits[valid_indices]
 
     event_factors = xp.ones(len(filtered_combos), dtype=xp.float32)
+    weights = params.get("score_weights") or config.SCORE_WEIGHTS_DEFAULT
+
+    metrics_batch = compute_combo_metrics(
+        filtered_combos, pnl_filtered, spot_range, net_debits_f,
+        current_spot=spot, today=as_of, risk_free_rate=rfr,
+        atm_vol_global=atm_vol, days_to_close_global=days_to_close,
+    )
+
     scores = score_combinations(
-        pnl_mid_filtered, net_debits_f, spot_range,
-        spot, atm_vol, days_to_close, rfr,
-        event_score_factors=event_factors,
+        metrics_batch, weights, event_score_factors=event_factors,
     )
     scores_cpu = to_cpu(scores)
 
     safe_debits = to_cpu(net_debits_f)
     pnl_mid_cpu = to_cpu(pnl_mid_filtered)
-    loss_probs = to_cpu(compute_loss_probability(
-        pnl_mid_filtered, spot_range, spot, atm_vol, days_to_close, rfr
-    ))
 
-    import math
-    spot_range_cpu = to_cpu(spot_range)
+    max_loss_pct_cpu = to_cpu(metrics_batch.max_loss_pct)
+    max_gain_real_pct_cpu = to_cpu(metrics_batch.max_gain_real_pct)
+    annualized_pct_cpu = to_cpu(metrics_batch.annualized_return_pct)
+    loss_prob_cpu = to_cpu(metrics_batch.loss_prob)
+    liquidity_cpu = to_cpu(metrics_batch.liquidity_score)
+    vol_disp_cpu = to_cpu(metrics_batch.vol_dispersion_pct)
+    slippage_cpu = to_cpu(metrics_batch.slippage_pct)
+    days_close_cpu = to_cpu(metrics_batch.days_to_close)
+    max_gain_real_dollar_cpu = to_cpu(metrics_batch.max_gain_real_dollar)
+    max_loss_dollar_cpu = to_cpu(metrics_batch.max_loss_dollar)
+    daily_gain_cpu = to_cpu(metrics_batch.daily_gain_dollar)
+    realistic_range_cpu = to_cpu(metrics_batch.realistic_range_pct)
 
     metrics = []
     for i in range(len(filtered_combos)):
-        combo_i = filtered_combos[i]
-        max_loss = float(pnl_mid_cpu[i].min())
-        max_gain = float(pnl_mid_cpu[i].max())
-
-        # ±1σ per-combo
-        atm_vol_i = min((abs(l.strike - spot), l.implied_vol) for l in combo_i.legs)[1]
-        days_i    = max(1, (combo_i.close_date - as_of).days)
-        range_i   = atm_vol_i * math.sqrt(days_i / 365.0) * 100
-        lo_i      = spot * (1 - range_i / 100)
-        hi_i      = spot * (1 + range_i / 100)
-        mask_i    = (spot_range_cpu >= lo_i) & (spot_range_cpu <= hi_i)
-        real_pnl  = pnl_mid_cpu[i][mask_i]
-        max_gain_real = float(real_pnl.max()) if mask_i.any() else max_gain
-
+        max_loss_d = float(max_loss_dollar_cpu[i])
+        max_gain_d = float(pnl_mid_cpu[i].max())
+        max_gain_real_d = float(max_gain_real_dollar_cpu[i])
         nd_raw = float(safe_debits[i])
         nd = abs(nd_raw) if abs(nd_raw) > 1.0 else 1e-6
 
         metrics.append({
-            "max_loss_pct":         max_loss      / nd * 100,
-            "loss_prob_pct":        loss_probs[i] * 100,
-            "max_gain_pct":         max_gain      / nd * 100,
-            "max_gain_real_pct":    max_gain_real / nd * 100,
-            "gain_loss_ratio":      max_gain_real / abs(max_loss) if max_loss != 0 else 0,
+            "max_loss_pct":         float(max_loss_pct_cpu[i]),
+            "loss_prob_pct":        float(loss_prob_cpu[i]) * 100,
+            "max_gain_pct":         max_gain_d / nd * 100,
+            "max_gain_real_pct":    float(max_gain_real_pct_cpu[i]),
+            "annualized_return_pct": float(annualized_pct_cpu[i]),
+            "liquidity_score":      float(liquidity_cpu[i]),
+            "vol_dispersion_pct":   float(vol_disp_cpu[i]),
+            "slippage_pct":         float(slippage_cpu[i]),
+            "gain_loss_ratio":      max_gain_real_d / abs(max_loss_d) if max_loss_d != 0 else 0,
             "score":                float(scores_cpu[i]),
-            "realistic_range_pct":  range_i,
-            "max_gain_real_dollar": max_gain_real,
-            "days_to_close":        days_i,
-            "daily_gain_dollar":    max_gain_real / days_i,
+            "realistic_range_pct":  float(realistic_range_cpu[i]),
+            "max_gain_real_dollar": max_gain_real_d,
+            "days_to_close":        int(days_close_cpu[i]),
+            "daily_gain_dollar":    float(daily_gain_cpu[i]),
         })
 
     order = sorted(range(len(filtered_combos)), key=lambda i: -metrics[i]["score"])

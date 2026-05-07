@@ -91,6 +91,8 @@ def _legs_from_specs(
             contract_symbol = _occ_symbol(
                 spec["symbol"], spec["expiration"], spec["option_type"], spec["strike"]
             ),
+            bid            = contract.bid if (contract and contract.bid > 0) else None,
+            ask            = contract.ask if (contract and contract.ask > 0) else None,
         ))
     return legs, missing
 
@@ -247,22 +249,40 @@ def build_single_combo_results(
         )
         nd = 1.0
 
+    if any(l.bid is None or l.ask is None for l in combination.legs):
+        slippage_pct_val = float("nan")
+    else:
+        spread_dollar = sum(
+            (l.ask - l.bid) * l.quantity * 100 for l in combination.legs
+        )
+        slippage_pct_val = spread_dollar / nd * 100.0
+
+    liquidity_val = (
+        min(l.volume * l.open_interest for l in combination.legs)
+        if all(l.volume and l.open_interest for l in combination.legs)
+        else 0.0
+    )
+
     metric = {
-        "max_loss_pct":         max_loss      / nd * 100,
-        "loss_prob_pct":        loss_prob     * 100,
-        "max_gain_pct":         max_gain      / nd * 100,
-        "max_gain_real_pct":    max_gain_real / nd * 100,
-        "gain_loss_ratio":      max_gain_real / abs(max_loss) if max_loss != 0 else 0.0,
-        "score":                0.0,
-        "realistic_range_pct":  realistic_range_pct,
-        "max_gain_real_dollar": max_gain_real,
-        "days_to_close":        days_i,
-        "daily_gain_dollar":    max_gain_real / days_i,
-        "_atm_vol_pct":         f"{atm_vol*100:.2f}%",
-        "_nd_raw":              raw_nd,
-        "_nd_used":             nd,
-        "_max_loss_dollar":     max_loss,
-        "_warnings":            warnings,
+        "max_loss_pct":          max_loss      / nd * 100,
+        "loss_prob_pct":         loss_prob     * 100,
+        "max_gain_pct":          max_gain      / nd * 100,
+        "max_gain_real_pct":     max_gain_real / nd * 100,
+        "annualized_return_pct": (max_gain_real / nd * 100) * (365.0 / days_i),
+        "liquidity_score":       float(liquidity_val),
+        "vol_dispersion_pct":    0.0,
+        "slippage_pct":          slippage_pct_val,
+        "gain_loss_ratio":       max_gain_real / abs(max_loss) if max_loss != 0 else 0.0,
+        "score":                 0.0,
+        "realistic_range_pct":   realistic_range_pct,
+        "max_gain_real_dollar":  max_gain_real,
+        "days_to_close":         days_i,
+        "daily_gain_dollar":     max_gain_real / days_i,
+        "_atm_vol_pct":          f"{atm_vol*100:.2f}%",
+        "_nd_raw":               raw_nd,
+        "_nd_used":              nd,
+        "_max_loss_dollar":      max_loss,
+        "_warnings":             warnings,
     }
 
     result = {

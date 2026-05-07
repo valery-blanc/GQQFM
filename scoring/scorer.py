@@ -1,102 +1,88 @@
-"""Score composite et classement des combinaisons filtrées."""
+"""Score composite v2 (FEAT-026) — classement multi-critères des combinaisons.
+
+Sept composants additifs normalisés min-max sur la population filtrée :
+  Score = w1 × norm(max_gain_real_pct)
+        + w2 × norm(annualized_return_pct)
+        + w3 × (1 − norm(loss_prob))
+        + w4 × (1 − norm(|max_loss_pct|))
+        + w5 × norm(liquidity_score)
+        + w6 × norm(vol_robustness)
+        + w7 × (1 − norm(slippage_pct))    # NaN remplacé par médiane
+
+Le multiplicateur événementiel (FEAT-005) reste appliqué en sortie :
+  Score_final = Score × event_score_factor
+"""
+
+from __future__ import annotations
 
 import config
 from engine.backend import xp
-from scoring.filters import realistic_max_gain
-from scoring.probability import compute_loss_probability
+from scoring.metrics import ComboMetricsBatch
+
+
+def _normalize(arr: "xp.ndarray") -> "xp.ndarray":
+    """Min-max → [0, 1]. Retourne 0 si toutes valeurs égales (range nul)."""
+    mn = arr.min()
+    mx = arr.max()
+    rng = mx - mn
+    if float(rng) < 1e-10:
+        return xp.zeros_like(arr)
+    return (arr - mn) / rng
+
+
+def _fillna_with_median(arr: "xp.ndarray") -> "xp.ndarray":
+    """Remplace NaN par la médiane des valeurs non-NaN.
+
+    Si toutes les valeurs sont NaN → retourne 0 (composant neutre pour tous).
+    """
+    nan_mask = xp.isnan(arr)
+    if not bool(nan_mask.any()):
+        return arr
+    valid = arr[~nan_mask]
+    if valid.size == 0:
+        return xp.zeros_like(arr)
+    median = xp.median(valid)
+    return xp.where(nan_mask, median, arr)
 
 
 def score_combinations(
-    pnl_mid: "xp.ndarray",         # shape (C, M)
-    net_debits: "xp.ndarray",      # shape (C,)
-    spot_range: "xp.ndarray",      # shape (M,)
-    current_spot: float,
-    atm_vol: float,
-    days_to_close: int,
-    risk_free_rate: float,
-    event_score_factors: "xp.ndarray | None" = None,  # shape (C,), multiplicateur
+    metrics: ComboMetricsBatch,
+    weights: config.ScoreWeights,
+    event_score_factors: "xp.ndarray | None" = None,
 ) -> "xp.ndarray":
+    """Score composite v2, shape (C,), valeurs ∈ [0, 1] (avant facteur event).
+
+    Args:
+        metrics: arrays per-combo calculés par scoring/metrics.py.
+        weights: poids du score (modifiables UI). Renormalisés à somme=1
+            si l'utilisateur a modifié les sliders.
+        event_score_factors: shape (C,) — multiplicateur événementiel par combo
+            (FEAT-005). Si None → 1.0 partout (rétrocompatible).
+
+    Returns:
+        Array shape (C,) du score composite final, prêt à être trié.
     """
-    Score composite entre 0 et 1 pour classer les combinaisons filtrées.
+    w = weights.normalized()
 
-    Score = (w1 * norm(gain_loss_ratio)
-           + w2 * (1 - norm(loss_prob))
-           + w3 * norm(expected_return))
-           × event_score_factor
-
-    Poids par défaut : 0.4, 0.3, 0.3
-    Si event_score_factors est None : factor=1.0 (rétro-compatible).
-    """
-    safe_debits = xp.where(net_debits == 0, xp.ones_like(net_debits) * 1e-6, net_debits)
-
-    max_gain_real = realistic_max_gain(pnl_mid, spot_range, current_spot, atm_vol, days_to_close)
-    max_loss = xp.abs(pnl_mid.min(axis=1))
-    safe_loss = xp.where(max_loss == 0, xp.ones_like(max_loss) * 1e-6, max_loss)
-
-    gain_loss_ratio = max_gain_real / safe_loss
-
-    loss_prob = compute_loss_probability(
-        pnl_mid, spot_range, current_spot, atm_vol, days_to_close, risk_free_rate
-    )
-
-    # Expected return : espérance du P&L pondéré par la distribution log-normale
-    expected_return = _compute_expected_return(
-        pnl_mid, spot_range, current_spot, atm_vol, days_to_close,
-        risk_free_rate, safe_debits
-    )
-
-    # Normalisation min-max par métrique
-    def norm(arr):
-        mn, mx = arr.min(), arr.max()
-        rng = mx - mn
-        if rng < 1e-10:
-            return xp.zeros_like(arr)
-        return (arr - mn) / rng
+    s_gain = _normalize(metrics.max_gain_real_pct)
+    s_ann = _normalize(metrics.annualized_return_pct)
+    s_lp = 1.0 - _normalize(metrics.loss_prob)
+    s_ml = 1.0 - _normalize(xp.abs(metrics.max_loss_pct))
+    s_liq = _normalize(metrics.liquidity_score)
+    s_robv = 1.0 - _normalize(metrics.vol_dispersion_pct)
+    s_slip = 1.0 - _normalize(_fillna_with_median(metrics.slippage_pct))
 
     score = (
-        config.SCORE_WEIGHT_GAIN_LOSS_RATIO * norm(gain_loss_ratio)
-        + config.SCORE_WEIGHT_LOSS_PROB * (1.0 - norm(loss_prob))
-        + config.SCORE_WEIGHT_EXPECTED_RETURN * norm(expected_return)
+        w.w_gain_real * s_gain
+        + w.w_annualized * s_ann
+        + w.w_loss_prob * s_lp
+        + w.w_max_loss * s_ml
+        + w.w_liquidity * s_liq
+        + w.w_robustness * s_robv
+        + w.w_slippage * s_slip
     )
 
     if event_score_factors is not None:
         score = score * event_score_factors
 
     return score
-
-
-def _compute_expected_return(
-    pnl_mid: "xp.ndarray",
-    spot_range: "xp.ndarray",
-    current_spot: float,
-    atm_vol: float,
-    days_to_close: int,
-    risk_free_rate: float,
-    net_debits: "xp.ndarray",
-) -> "xp.ndarray":
-    """Espérance du P&L en % du capital, pondérée par la distribution log-normale."""
-    T = days_to_close / 365.0
-    if T <= 0:
-        return xp.zeros(pnl_mid.shape[0], dtype=xp.float32)
-
-    mu = xp.log(xp.asarray(current_spot, dtype=xp.float32)) + (
-        risk_free_rate - 0.5 * atm_vol ** 2
-    ) * T
-    sigma = atm_vol * T ** 0.5
-
-    log_s = xp.log(spot_range.astype(xp.float32))
-    pdf = (
-        xp.exp(-0.5 * ((log_s - mu) / sigma) ** 2)
-        / (spot_range.astype(xp.float32) * sigma * (2 * 3.141592653589793) ** 0.5)
-    )
-
-    # P&L en % du capital : (C, M)
-    pnl_pct = pnl_mid / net_debits[:, None] * 100.0
-
-    dx = xp.diff(spot_range.astype(xp.float32))
-    integrand = pnl_pct * pdf[None, :]
-    expected = 0.5 * (
-        (integrand[:, :-1] + integrand[:, 1:]) * dx[None, :]
-    ).sum(axis=1)
-
-    return expected

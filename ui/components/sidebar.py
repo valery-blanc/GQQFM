@@ -5,10 +5,67 @@ from datetime import date
 import streamlit as st
 
 import config
+from config import ScoreWeights
 from data.models import ScoringCriteria
 from data.risk_free_rate import fetch_risk_free_rate
 from engine.backend import get_device_info
 from templates import ALL_TEMPLATES
+
+
+_WEIGHT_FIELDS = [
+    ("w_gain_real",   "Gain max ±1σ",            "Gain max réaliste dans la fenêtre ±1σ (priorité #1)."),
+    ("w_annualized",  "Rendement annualisé",     "Gain max ±1σ × 365 / days_to_close — combine durée et rendement."),
+    ("w_loss_prob",   "Sécurité — proba perte",  "Récompense les combos avec faible probabilité de perte (lognormale)."),
+    ("w_max_loss",    "Sécurité — perte max %",  "Récompense les combos avec faible perte max en % du capital."),
+    ("w_liquidity",   "Liquidité",               "min(volume × open_interest) sur les legs — exécutabilité réelle."),
+    ("w_robustness",  "Robustesse à la vol",     "Stabilité du P&L au spot courant entre les scénarios de vol."),
+    ("w_slippage",    "Slippage (bid/ask)",      "Pénalité spread bid/ask. Neutre (médiane) si données absentes."),
+]
+
+
+def _render_score_weights_section() -> ScoreWeights:
+    """Affiche les sliders de pondération du score et retourne l'instance ScoreWeights."""
+    st.sidebar.markdown("---")
+
+    if "score_weights" not in st.session_state:
+        st.session_state["score_weights"] = ScoreWeights()
+
+    sw: ScoreWeights = st.session_state["score_weights"]
+
+    with st.sidebar.expander("⚖️ Pondération du score (avancé)", expanded=False):
+        if st.button("Réinitialiser les poids par défaut", key="reset_score_weights",
+                     use_container_width=True):
+            st.session_state["score_weights"] = ScoreWeights()
+            st.rerun()
+
+        from dataclasses import asdict
+        current = asdict(sw)
+        total = sum(current.values()) or 1.0
+        st.caption(
+            "Les poids sont renormalisés (somme = 100%) avant calcul. "
+            "Ajustez l'importance relative de chaque composant du score."
+        )
+
+        new_values: dict[str, float] = {}
+        for field, label, help_text in _WEIGHT_FIELDS:
+            value = float(current[field])
+            normalized_share = value / total
+            new_values[field] = st.slider(
+                f"{label} — {normalized_share:.0%}",
+                min_value=0.0, max_value=1.0,
+                value=value, step=0.05,
+                key=f"sw_{field}",
+                help=help_text,
+            )
+
+        new_total = sum(new_values.values()) or 1.0
+        st.caption(f"Somme brute : **{new_total:.2f}** (renormalisée à 1.0).")
+
+        if any(abs(new_values[k] - current[k]) > 1e-9 for k in current):
+            st.session_state["score_weights"] = ScoreWeights(**new_values)
+            sw = st.session_state["score_weights"]
+
+    return sw
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -313,6 +370,8 @@ def render_sidebar() -> dict:
         )
         use_american_pricer = pricer_choice.startswith("Pricer américain")
 
+    score_weights = _render_score_weights_section()
+
     # Bouton scan déplacé en zone principale (FEAT-020)
     scan_clicked = False
 
@@ -359,4 +418,5 @@ def render_sidebar() -> dict:
         "near_expiry_range": tuple(near_expiry_range),
         "far_expiry_range": tuple(far_expiry_range),
         "scan_clicked": scan_clicked,
+        "score_weights": score_weights,
     }

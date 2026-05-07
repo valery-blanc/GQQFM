@@ -47,6 +47,8 @@ class Leg:
     volume: int = 0
     open_interest: int = 0
     div_yield: float = 0.0         # rendement de dividende continu annualisé
+    bid: float | None = None       # FEAT-026 : prix bid pour calcul du slippage
+    ask: float | None = None       # FEAT-026 : prix ask pour calcul du slippage
 
 
 @dataclass

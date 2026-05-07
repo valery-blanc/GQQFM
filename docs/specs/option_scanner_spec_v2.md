@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : BUG-027 / BUG-026 (2026-05-04)
+> Version : FEAT-026 (2026-05-07)
 
 ## 1. Vue d'ensemble
 
@@ -828,34 +828,57 @@ Métriques per-combo (BUG-022 — post-filtrage, boucle Python) :
 - `nd` = `abs(net_debit)` (évite inversion de signe sur spreads à crédit)
 - Colonnes additionnelles : `Gain ±1σ $`, `$/j` (gain par jour jusqu'à J-3 short)
 
-### 6.4 Scoring pour le classement des résultats
+### 6.4 Scoring pour le classement des résultats — FEAT-026
 
-Les combinaisons qui passent le filtre sont ensuite classées par un score composite.
+Les combinaisons qui passent le filtre sont classées par un **score composite à 7
+composants additifs** normalisés min-max sur la population filtrée.
+
+Les **poids sont ajustables dans la sidebar Streamlit** via 7 sliders (expander
+"⚖️ Pondération du score (avancé)") et persistés via `st.session_state`.
 
 ```python
 def score_combinations(
-    pnl_mid: xp.ndarray,           # shape (C_filtered, M)
-    net_debits: xp.ndarray,        # shape (C_filtered,)
-    loss_probs: xp.ndarray,        # shape (C_filtered,)
-    criteria: ScoringCriteria,
+    metrics: ComboMetricsBatch,            # 7 métriques per-combo
+    weights: ScoreWeights,                  # poids modifiables UI
+    event_score_factors: xp.ndarray | None = None,
 ) -> xp.ndarray:
     """
-    Score composite pour classer les combinaisons filtrées.
+    Score = w1 × norm(max_gain_real_pct)         # gain ±1σ — priorité #1
+          + w2 × norm(annualized_return_pct)      # gain × 365 / days_to_close
+          + w3 × (1 − norm(loss_prob))            # 1 − proba perte (lognormale)
+          + w4 × (1 − norm(|max_loss_pct|))       # 1 − perte max %
+          + w5 × norm(liquidity_score)            # min(volume × OI) sur les legs
+          + w6 × (1 − norm(vol_dispersion_pct))   # robustesse aux scénarios de vol
+          + w7 × (1 − norm(slippage_pct))         # 1 − Σ(ask−bid) / net_debit
 
-    Score = (w1 * normalized_gain_loss_ratio
-           + w2 * (1 - normalized_loss_prob)
-           + w3 * normalized_expected_return)
-           × event_score_factor   ← FEAT-005 : multiplicateur événementiel
+    Score_final = Score × event_score_factor      # FEAT-005, conservé
 
-    Les poids par défaut : w1=0.4, w2=0.3, w3=0.3
-    event_score_factor=1.0 si event_calendar non fourni (rétro-compatible).
-
-    L'expected return est calculé comme l'espérance du P&L pondéré par la
-    distribution log-normale du sous-jacent.
-
-    Retourne: xp.ndarray, shape (C_filtered,) - scores entre 0 et 1.
+    Poids par défaut (renormalisés à somme=1.0) :
+      w1=0.25, w2=0.20, w3=0.15, w4=0.10, w5=0.10, w6=0.10, w7=0.10
     """
 ```
+
+**Métriques calculées per-combo** dans `scoring/metrics.py` (`compute_combo_metrics`) :
+
+| Métrique | Formule |
+|---|---|
+| `max_loss_pct` | `min(pnl_mid) / |net_debit| × 100` |
+| `max_gain_real_pct` | `max(pnl_mid[mask_±1σ]) / |net_debit| × 100` |
+| `annualized_return_pct` | `max_gain_real_pct × 365 / days_to_close` |
+| `loss_prob` | ∫ (P&L<0) × pdf_lognormale dS, ∈ [0, 1] |
+| `liquidity_score` | `min(volume × open_interest)` sur les legs |
+| `vol_dispersion_pct` | `std(P&L[V scénarios] au spot courant) / |net_debit| × 100` |
+| `slippage_pct` | `Σ((ask−bid) × qty × 100) / |net_debit|` (NaN si bid/ask absent) |
+
+**Slippage NaN-safe :** `bid`/`ask` rarement disponibles (yfinance hors séance,
+polygon historique, saisie directe). Si au moins une leg manque bid ou ask,
+`slippage_pct = NaN`. Au moment de la normalisation, les NaN sont remplacés par la
+**médiane** du dataset → combo neutre sur ce composant.
+
+**Bid/Ask** ajoutés à `Leg` (FEAT-026) : `bid: float | None = None`, `ask: float | None = None`.
+Propagés depuis `OptionContract.bid/.ask` dans `engine/combinator.py` et `ui/combo_parser.py`.
+
+Cf. `docs/specs/FEAT-026-score-composite-v2.md` pour le détail complet.
 
 ---
 
@@ -1237,10 +1260,16 @@ GPU_SAFETY_FACTOR: float = 2.5
 # Nombre max de combinaisons générées par template
 MAX_COMBINATIONS: int = 500_000
 
-# Scoring weights
-SCORE_WEIGHT_GAIN_LOSS_RATIO: float = 0.4
-SCORE_WEIGHT_LOSS_PROB: float = 0.3
-SCORE_WEIGHT_EXPECTED_RETURN: float = 0.3
+# Scoring weights — FEAT-026 (dataclass ScoreWeights, modifiable UI)
+@dataclass
+class ScoreWeights:
+    w_gain_real: float = 0.25     # gain max ±1σ — priorité #1
+    w_annualized: float = 0.20    # rendement %/an
+    w_loss_prob: float = 0.15     # 1 − probabilité de perte
+    w_max_loss: float = 0.10      # 1 − perte max %
+    w_liquidity: float = 0.10     # min(volume × OI)
+    w_robustness: float = 0.10    # robustesse vol
+    w_slippage: float = 0.10      # 1 − slippage % (NaN-safe)
 
 # ── Screener (extrait) ──
 SCREENER_REQUEST_DELAY: float = 0.5   # délai par thread (rate-limit Yahoo)
