@@ -11,6 +11,7 @@ def render_results_table(
     metrics: list[dict],
     symbols: list[str] | None = None,
     realistic_range_pct: float | None = None,
+    spot: float | None = None,
 ) -> int | None:
     """
     Affiche le tableau des résultats triés par score décroissant.
@@ -33,8 +34,6 @@ def render_results_table(
                 f"{direction}{leg.quantity} {leg.option_type}{ticker_part} {date_str} {strike_str}"
             )
         legs_summary = " | ".join(legs_lines)
-        range_lbl = (f"±{m['realistic_range_pct']:.1f}%"
-                     if "realistic_range_pct" in m else "±1σ")
         days_lbl  = f"J-{m['days_to_close']}" if "days_to_close" in m else ""
         row = {"Rang": i + 1}
         row.update({
@@ -43,7 +42,7 @@ def render_results_table(
             "Net Debit ($)": f"{combo.net_debit:+,.0f}",
             "Perte max %": f"{m['max_loss_pct']:.1f}%",
             "Proba perte %": f"{m['loss_prob_pct']:.1f}%",
-            f"Gain {range_lbl} %": f"{m.get('max_gain_real_pct', m['max_gain_pct']):.1f}%",
+            "Gain ±1σ %": f"{m.get('max_gain_real_pct', m['max_gain_pct']):.1f}%",
             "Gain ±1σ $": f"${m.get('max_gain_real_dollar', 0):+,.0f}",
             "$/j": f"${m.get('daily_gain_dollar', 0):+,.1f}" if days_lbl else "—",
             "Ratio G/L": f"{m['gain_loss_ratio']:.2f}",
@@ -60,10 +59,21 @@ def render_results_table(
         df = pd.DataFrame(rows)
 
     st.subheader(f"Résultats — {len(combinations)} combinaison(s)")
-    st.caption(
-        "Gain ±1σ % = gain max dans la fenêtre ±1σ de chaque combo (IV ATM × √(J/365)) / net_debit · "
-        "Gain ±1σ $ = valeur absolue · $/j = gain $ / jours jusqu'à J-3 short"
-    )
+    if spot and metrics:
+        m0 = metrics[0]
+        range_pct = m0.get("realistic_range_pct", 0.0)
+        lo = spot * (1 - range_pct / 100)
+        hi = spot * (1 + range_pct / 100)
+        st.caption(
+            f"fenêtre ±1σ (top combo) = $[{lo:,.0f}, {hi:,.0f}],  σ = {range_pct:.1f}%  ·  "
+            "Gain ±1σ % = gain max dans cette fenêtre / net_debit  ·  "
+            "Gain ±1σ $ = valeur absolue  ·  $/j = gain $ / jours jusqu'à J-3 short"
+        )
+    else:
+        st.caption(
+            "Gain ±1σ % = gain max dans la fenêtre ±1σ de chaque combo (IV ATM × √(J/365)) / net_debit · "
+            "Gain ±1σ $ = valeur absolue · $/j = gain $ / jours jusqu'à J-3 short"
+        )
 
     # Police réduite pour le tableau (notamment la colonne Legs multi-lignes)
     st.markdown(

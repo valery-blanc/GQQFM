@@ -418,6 +418,18 @@ def main():
     m = results["metrics"][idx]
     pnl_for_combo = results["pnl_per_combo"][idx]   # (V, M)
 
+    symbols = results.get("symbols")
+    combo_symbol = symbols[idx] if symbols else (results.get("symbol") or None)
+    ticker_part = f" {combo_symbol}" if combo_symbol else ""
+    combo_name_std = " | ".join(
+        f"{'L' if leg.direction == 1 else 'S'}{leg.quantity} "
+        f"{leg.option_type}{ticker_part} "
+        f"{leg.expiration.strftime('%d%b%Y').upper()} "
+        f"{leg.strike:g}"
+        for leg in combo.legs
+    )
+    st.code(combo_name_std, language=None)
+
     fig = plot_pnl_profile(
         combination=combo,
         pnl_tensor=pnl_for_combo,
@@ -426,15 +438,18 @@ def main():
         loss_prob=m["loss_prob_pct"] / 100,
         max_loss_pct=m["max_loss_pct"],
         max_gain_pct=m["max_gain_pct"],
+        symbol=combo_symbol,
     )
     st.plotly_chart(fig, use_container_width=True)
 
     st.markdown("---")
 
     # Tableau des résultats
+    top_spot = results["spots"][0] if results.get("spots") else results.get("spot")
     selected = render_results_table(results["combinations"], results["metrics"],
                                     results.get("symbols"),
-                                    realistic_range_pct=results.get("realistic_range_pct"))
+                                    realistic_range_pct=results.get("realistic_range_pct"),
+                                    spot=top_spot)
     if selected is not None and selected != st.session_state.selected_combo_idx:
         st.session_state.selected_combo_idx = selected
         st.rerun()
@@ -442,8 +457,6 @@ def main():
     st.markdown("---")
 
     # Détails de la combinaison
-    symbols = results.get("symbols")
-    combo_symbol = symbols[idx] if symbols else (results.get("symbol") or None)
     render_combo_detail(
         combo, m,
         symbol=combo_symbol,

@@ -14,6 +14,7 @@ def plot_pnl_profile(
     loss_prob: float,
     max_loss_pct: float,
     max_gain_pct: float,
+    symbol: str | None = None,
 ) -> go.Figure:
     """
     Génère le graphique P&L interactif Plotly.
@@ -170,15 +171,17 @@ def plot_pnl_profile(
             bordercolor="rgba(255,0,0,0.5)",
         )
 
+    ticker_part = f" {symbol}" if symbol else ""
     title_legs = " | ".join(
         f"{'L' if leg.direction == 1 else 'S'}{leg.quantity} "
-        f"{leg.option_type.upper()[0]} {leg.strike:.0f} "
-        f"{leg.expiration.strftime('%d%b%y').upper()}"
+        f"{leg.option_type}{ticker_part} "
+        f"{leg.expiration.strftime('%d%b%Y').upper()} "
+        f"{leg.strike:g}"
         for leg in combination.legs
     )
 
     fig.update_layout(
-        title=dict(text=f"{combination.template_name} — {title_legs}", font=dict(size=13)),
+        title=dict(text=title_legs, font=dict(size=12)),
         template="plotly_dark",
         xaxis=dict(title="Prix du sous-jacent"),
         yaxis=dict(title="P&L (% capital)", ticksuffix="%"),

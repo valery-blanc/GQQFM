@@ -525,3 +525,10 @@
 - [x] docs/bugs/BUG-030-iv-rank-yfinance-thread-hang.md — mis à jour (4 sections)
 - [x] Test ANQA — screener complet sans blocage — OK 2026-05-07
 - [x] Commit (série : ee07b24 → 26b54ea → f318831 → 05edd8d)
+
+## FEAT-025 — Titre graphe standard + fenêtre ±1σ résultats
+
+- [x] ui/components/chart.py — param `symbol`, titre format standard `L1 call SPY 17JUL2026 720 | …`
+- [x] ui/components/results_table.py — param `spot`, affichage `fenêtre ±1σ = $[lo, hi], σ = x%`, nom colonne fixe `Gain ±1σ %`
+- [x] ui/app.py — `st.code(combo_name_std)` copier-coller, passe `symbol` et `spot`
+- [x] docs/specs/FEAT-025-chart-title-sigma-window.md
