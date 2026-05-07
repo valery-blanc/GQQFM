@@ -146,8 +146,14 @@ def run_scan_headless(symbol: str = "SPY", max_combinations: int = 1000,
     pnl_mid_filtered  = pnl_filtered[config.VOL_MEDIAN_INDEX]   # (C_f, M)
     net_debits_f      = net_debits[valid_idx]
 
-    scores     = score_combinations(pnl_mid_filtered, net_debits_f, spot_range,
-                                    spot, atm_vol_global, days_close_global, RFR)
+    from scoring.metrics import compute_combo_metrics
+    metrics_batch = compute_combo_metrics(
+        filtered_combos, pnl_filtered, spot_range, net_debits_f,
+        current_spot=spot, today=chain.fetch_timestamp.date(),
+        risk_free_rate=RFR,
+        atm_vol_global=atm_vol_global, days_to_close_global=days_close_global,
+    )
+    scores     = score_combinations(metrics_batch, config.SCORE_WEIGHTS_DEFAULT)
     scores_cpu = to_cpu(scores)
 
     spot_range_cpu = to_cpu(spot_range)
