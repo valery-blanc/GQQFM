@@ -549,7 +549,7 @@
 - [x] docs/specs/option_scanner_spec_v2.md — §6.4 mis à jour + version FEAT-026
 - [x] Test non-régression `tests/test_scan_vs_direct.py` — DIAG_COMPARE_OK ratio < 2x
 - [x] Commit fa3d88d + 42e6b5d (test fix)
-- [ ] Test ANQA — ranking + sliders + fallback bid/ask manquants
+- [x] Test ANQA — ranking + sliders + fallback bid/ask manquants — validé 2026-05-07
 
 ## FEAT-026b — Capital immobilisé + gain ±1σ en $ priorité #1
 
@@ -563,5 +563,5 @@
 - [x] ui/components/sidebar.py — labels sliders : "Gain max ±1σ ($)" / "Rendement annualisé (%)"
 - [x] docs/specs/FEAT-026-score-composite-v2.md — section FEAT-026b ajoutée
 - [x] docs/specs/option_scanner_spec_v2.md — §6.4 mis à jour
-- [ ] Test ANQA — vérifier carte "Capital immobilisé" visible + classement correct
-- [ ] Commit final + déploiement ANQA
+- [x] Test ANQA — carte "Capital immobilisé" visible + classement correct — validé 2026-05-07
+- [x] Commit 8d68ff5 + déploiement ANQA
