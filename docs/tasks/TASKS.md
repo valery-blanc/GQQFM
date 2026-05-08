@@ -2,11 +2,22 @@
 
 ## FEAT-028 — Alignement P&L théorique au replay
 
-- [ ] `backtesting/replay.py` — ajouter `compute_iv_at_replay_point()`
-- [ ] `ui/components/chart.py` — param `observed_point` sur `plot_pnl_profile`
-- [ ] `ui/page_backtest.py` — slider curseur + recalcul du profil P&L à l'instant choisi
-- [ ] `docs/specs/option_scanner_spec.md` — section replay : nouvelles capacités + retirer "IV historique" des limitations V3
-- [ ] Test local + déploiement ANQA + validation utilisateur
+- [x] `backtesting/replay.py` — ajouter `compute_iv_at_replay_point()`
+- [x] `ui/components/chart.py` — param `observed_point` sur `plot_pnl_profile`
+- [x] `ui/page_backtest.py` — slider curseur + recalcul du profil P&L à l'instant choisi
+- [x] TTE intraday en secondes pour pricer le jour d'expi des shorts
+- [x] BS-européen sur la courbe FEAT-028 + affichage écart marker-courbe
+- [x] Slider sur datetime au lieu d'index
+- [x] `docs/specs/option_scanner_spec_v2.md` — section replay : nouvelles capacités + retirer "IV historique" des limitations V3
+- [x] Déploiement ANQA + validation utilisateur (24/04 13h30 → marker pose à +25.9%)
+
+## FEAT-029 — Backtest de validation du ranking
+
+- [ ] `scripts/validate_ranking.py` — orchestrateur (boucle variants × symbols × dates)
+- [ ] Variantes : `current`, `days_bc_0`, `days_bc_5`, `bs_eur`, `iv_calibrated`, `random`
+- [ ] Sortie : CSV brut + summary + scatters PNG + rapport Markdown
+- [ ] Lancement ANQA (ETA ~3 h)
+- [ ] Décision : adopter / ne pas adopter chaque variante selon les chiffres
 
 ## Done
 
