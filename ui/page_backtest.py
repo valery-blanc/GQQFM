@@ -480,9 +480,13 @@ def _render_dynamic_profile_at_cursor(
     tensor = combinations_to_tensor(
         [combo_dyn], days_before_close=days_bc, today_dt=today_dt,
     )
+    # FEAT-028 : on force BS-européen pour la courbe (cohérence avec la bisection
+    # BS-européen utilisée par compute_iv_at_replay_point). Sinon BJS-américain
+    # sur IV bisectée-européenne → prix > prix marché pour les puts long-dated
+    # (early exercise premium), et le marker ne pose plus sur la courbe.
     pnl_tensor = compute_pnl_batch(
         tensor, spot_range, vol_scenarios, rate,
-        use_american_pricer=params.get("use_american_pricer", True),
+        use_american_pricer=False,
     )
     pnl_2d = to_cpu(pnl_tensor)[:, 0, :]            # (V, M)
     spot_range_cpu = to_cpu(spot_range)
@@ -490,6 +494,11 @@ def _render_dynamic_profile_at_cursor(
     nd_abs = abs(combo.net_debit) if abs(combo.net_debit) > 1.0 else 1.0
     max_loss_pct = float(pnl_mid.min()) / nd_abs * 100
     max_gain_pct = float(pnl_mid.max()) / nd_abs * 100
+
+    # P&L théorique au spot du marker (pour mesurer l'écart d'alignement)
+    nearest_idx = int(np.argmin(np.abs(spot_range_cpu - pt.spot)))
+    pnl_theo_at_spot_pct = float(pnl_mid[nearest_idx]) / nd_abs * 100
+    align_gap = pnl_theo_at_spot_pct - pt.pnl_pct
 
     symbol = results.get("symbol")
     fig = plot_pnl_profile(
@@ -517,6 +526,9 @@ def _render_dynamic_profile_at_cursor(
         f"**Instant** : {pt_label}  \n"
         f"**Spot** : ${pt.spot:.2f}  \n"
         f"**P&L observé** : {pt.pnl_pct:+.2f}% (${pt.pnl_dollar:+,.0f})  \n"
+        f"**P&L théorique au spot du marker** : {pnl_theo_at_spot_pct:+.2f}%  \n"
+        f"**Écart marker-courbe** : {align_gap:+.2f} pts "
+        f"({'OK' if abs(align_gap) < 0.5 else 'décalage'})  \n"
         f"**Mode** : {pt.mode}{mode_warn}"
     )
     iv_lines = []
