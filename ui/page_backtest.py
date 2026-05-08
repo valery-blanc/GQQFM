@@ -397,55 +397,43 @@ def _render_replay_section(combo, idx: int, as_of, results: dict, params: dict) 
     st.markdown("---")
     st.subheader("Replay historique")
 
+    _REPLAY_OPTS = {"1 jour": "daily", "1 heure": "1h", "15 min": "15min", "5 min": "5min"}
+
     default_days = max(5, min(60, (combo.close_date - as_of).days))
     slider_key = f"bt_days_{idx}_{combo.close_date}"
     days_forward = st.slider("Jours à replayer", 5, 60, default_days, 1, key=slider_key)
 
-    resolution = st.selectbox(
-        "Résolution intraday",
-        options=list(RESOLUTIONS.keys()),
-        index=0,
-        format_func={"1h": "1 heure", "15min": "15 minutes", "5min": "5 minutes"}.get,
+    res_label = st.selectbox(
+        "Résolution",
+        options=list(_REPLAY_OPTS.keys()),
+        index=3,  # "5 min" par défaut
         key=f"bt_resolution_{idx}_{combo.close_date}",
-        help="Précision des barres pour le replay intraday (underlying + legs).",
     )
+    res_key = _REPLAY_OPTS[res_label]
 
-    col_b1, col_b2 = st.columns(2)
-    launch_daily = col_b1.button("Lancer le replay (journalier)", type="primary",
-                                  use_container_width=True)
-    launch_hourly = col_b2.button(f"Lancer le replay ({resolution})", type="secondary",
-                                   use_container_width=True)
+    launch = st.button(f"Lancer le replay ({res_label})", type="primary",
+                       use_container_width=True)
 
-    if launch_daily:
-        bar = st.progress(0.0, text="Replay journalier…")
+    if launch:
+        bar = st.progress(0.0, text=f"Replay {res_label}…")
         status = st.empty()
         cb = _make_progress_callback(bar, status)
         try:
-            points = backtest_combo(
-                combo, as_of=as_of, days_forward=days_forward,
-                provider=results["provider"], rate=params["risk_free_rate"],
-                progress_callback=cb,
-            )
-            st.session_state.bt_replay = ("daily", points)
+            if res_key == "daily":
+                points = backtest_combo(
+                    combo, as_of=as_of, days_forward=days_forward,
+                    provider=results["provider"], rate=params["risk_free_rate"],
+                    progress_callback=cb,
+                )
+            else:
+                points = backtest_combo_hourly(
+                    combo, as_of=as_of, days_forward=days_forward,
+                    provider=results["provider"], rate=params["risk_free_rate"],
+                    progress_callback=cb, resolution=res_key,
+                )
+            st.session_state.bt_replay = (res_key, points)
         except Exception as exc:
             st.error(f"Erreur replay : {exc}")
-        finally:
-            bar.empty()
-            status.empty()
-
-    if launch_hourly:
-        bar = st.progress(0.0, text="Replay horaire…")
-        status = st.empty()
-        cb = _make_progress_callback(bar, status)
-        try:
-            points = backtest_combo_hourly(
-                combo, as_of=as_of, days_forward=days_forward,
-                provider=results["provider"], rate=params["risk_free_rate"],
-                progress_callback=cb, resolution=resolution,
-            )
-            st.session_state.bt_replay = (resolution, points)
-        except Exception as exc:
-            st.error(f"Erreur replay horaire : {exc}")
         finally:
             bar.empty()
             status.empty()

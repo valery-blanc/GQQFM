@@ -10,6 +10,11 @@ st.set_page_config(
     layout="wide",
 )
 
+st.markdown(
+    "<style>.block-container{padding-top:1rem;padding-bottom:0}</style>",
+    unsafe_allow_html=True,
+)
+
 
 def main():
     st.title("Options P&L Scanner")
