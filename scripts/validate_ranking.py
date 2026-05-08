@@ -7,12 +7,18 @@ sur ~5400 combos top-K.
 Sortie : scripts/output/{validation_full.csv, validation_summary.csv,
 validation_scatter_<variant>.png, validation_report.md}.
 
-Usage : python -m scripts.validate_ranking
-        (sur ANQA, ETA ~3h)
+Modes :
+  python -m scripts.validate_ranking                   # full run (scan + replays)
+  python -m scripts.validate_ranking --prefetch-chains # cache chains uniquement
+                                                       # (Tulear no-GPU, warm cache)
+
+Le cache Polygon SQLite est dans `data/.polygon_cache.db`. Pour copier de Tulear
+vers ANQA : scp via le partage UNC + git pull.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import random
@@ -574,5 +580,54 @@ Voir les fichiers `validation_scatter_<variant>.png` dans le meme dossier.
     return out
 
 
+def prefetch_chains() -> None:
+    """Mode no-GPU : prefetche options chains + 1 an de bars underlying par
+    `(symbol, as_of)`. Cible Tulear (pas de GPU) — warm cache pour ANQA."""
+    from backtesting.replay import _prefetch_daily_range
+
+    provider = PolygonHistoricalProvider()
+    n_steps = len(SYMBOLS) * len(DATES_TO_TEST)
+    step = 0
+    t0 = time.perf_counter()
+    print(f"FEAT-029 prefetch chains : {len(SYMBOLS)} symbols x "
+          f"{len(DATES_TO_TEST)} dates = {n_steps} chains a fetcher\n")
+
+    for symbol in SYMBOLS:
+        for as_of in DATES_TO_TEST:
+            step += 1
+            tag = f"[{step}/{n_steps}] {symbol} / {as_of}"
+            print(tag, flush=True)
+            t1 = time.perf_counter()
+            try:
+                chain = provider.get_options_chain(
+                    symbol, as_of=as_of, progress_callback=_log,
+                )
+                n = len(chain.contracts) if chain else 0
+                print(f"  chain : {n} contracts ({time.perf_counter()-t1:.1f}s)",
+                      flush=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  [ERR chain] {exc}", flush=True)
+                continue
+
+            t2 = time.perf_counter()
+            try:
+                start = as_of - timedelta(days=365 + 60)
+                bars = _prefetch_daily_range(provider, symbol.upper(), start, as_of)
+                print(f"  underlying 1y bars : {len(bars)} jours "
+                      f"({time.perf_counter()-t2:.1f}s)", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  [ERR HV30 underlying] {exc}", flush=True)
+
+    print(f"\nPrefetch terminus : {(time.perf_counter()-t0)/60:.1f} min")
+
+
 if __name__ == "__main__":
-    run_validation()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prefetch-chains", action="store_true",
+                        help="Mode no-GPU : warm cache Polygon (chains + "
+                             "underlying 1y) sans run scan/replay.")
+    args = parser.parse_args()
+    if args.prefetch_chains:
+        prefetch_chains()
+    else:
+        run_validation()
