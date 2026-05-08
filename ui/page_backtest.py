@@ -475,7 +475,11 @@ def _render_dynamic_profile_at_cursor(
         dtype=xp.float32,
     )
     vol_scenarios = [params["vol_low"], 1.0, params["vol_high"]]
-    tensor = combinations_to_tensor([combo_dyn], days_before_close=days_bc)
+    # FEAT-028 : si point intraday, passer today_dt → TTE en secondes au lieu de jours
+    today_dt = pt.date if isinstance(pt.date, datetime) else None
+    tensor = combinations_to_tensor(
+        [combo_dyn], days_before_close=days_bc, today_dt=today_dt,
+    )
     pnl_tensor = compute_pnl_batch(
         tensor, spot_range, vol_scenarios, rate,
         use_american_pricer=params.get("use_american_pricer", True),

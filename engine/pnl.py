@@ -1,11 +1,16 @@
 """Calcul P&L batch sur GPU/CPU pour toutes les combinaisons simultanément."""
 
 import numpy as np
-from datetime import timedelta
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import config
 from engine.backend import xp, to_xp
 from engine.black_scholes import bs_american_price, bs_price, intrinsic_value
+
+_ET = ZoneInfo("America/New_York")
+_NYSE_CLOSE = time(16, 0)
+_SECONDS_PER_YEAR = 365.0 * 86400.0
 
 
 def compute_batch_size(num_spots: int, num_vol_scenarios: int, num_legs: int = 4) -> int:
@@ -18,13 +23,23 @@ def compute_batch_size(num_spots: int, num_vol_scenarios: int, num_legs: int = 4
     return int(config.MAX_GPU_MEMORY_BYTES / bytes_per_combo)
 
 
-def combinations_to_tensor(combinations: list, days_before_close: int = 0) -> dict:
+def combinations_to_tensor(
+    combinations: list,
+    days_before_close: int = 0,
+    today_dt: datetime | None = None,
+) -> dict:
     """
     Convertit une liste de Combination en dict de tenseurs xp prêts pour le GPU.
 
     days_before_close : nombre de jours avant l'expiration des shorts utilisé comme
     horizon de pricing. 0 = à l'expiration exacte (comportement historique),
     3 = J-3 (valeur recommandée pour des cibles réalistes).
+
+    today_dt (FEAT-028) : datetime ET (naïf ou aware) du moment d'évaluation.
+    Si fourni, surcharge `days_before_close` et calcule la TTE de chaque leg avec
+    une résolution en secondes (TTE = secondes jusqu'à 16h ET le jour d'expi).
+    Indispensable pour le replay intraday le jour d'expi des shorts (sinon
+    TTE est arrondie à 0 jour et BS retourne valeur intrinsèque).
 
     Retourne un dict avec les clés :
       option_types, directions, quantities, strikes,
@@ -43,6 +58,10 @@ def combinations_to_tensor(combinations: list, days_before_close: int = 0) -> di
     tte_at_close = np.zeros((C, L), dtype=np.float32)
     div_yields = np.zeros((C, L), dtype=np.float32)
 
+    today_naive = None
+    if today_dt is not None:
+        today_naive = today_dt.replace(tzinfo=None) if today_dt.tzinfo else today_dt
+
     for i, combo in enumerate(combinations):
         for j, leg in enumerate(combo.legs):
             option_types[i, j] = 0 if leg.option_type == "call" else 1
@@ -51,9 +70,14 @@ def combinations_to_tensor(combinations: list, days_before_close: int = 0) -> di
             strikes[i, j] = leg.strike
             entry_prices[i, j] = leg.entry_price
             implied_vols[i, j] = leg.implied_vol
-            exit_date = combo.close_date - timedelta(days=days_before_close)
-            tte_days = max(0, (leg.expiration - exit_date).days)
-            tte_at_close[i, j] = tte_days / 365.0
+            if today_naive is not None:
+                exp_close_dt = datetime.combine(leg.expiration, _NYSE_CLOSE)
+                secs = max(0.0, (exp_close_dt - today_naive).total_seconds())
+                tte_at_close[i, j] = secs / _SECONDS_PER_YEAR
+            else:
+                exit_date = combo.close_date - timedelta(days=days_before_close)
+                tte_days = max(0, (leg.expiration - exit_date).days)
+                tte_at_close[i, j] = tte_days / 365.0
             div_yields[i, j] = leg.div_yield
 
     return {

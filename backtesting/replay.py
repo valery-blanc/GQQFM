@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Callable
 from zoneinfo import ZoneInfo
 
@@ -14,6 +14,8 @@ from data.provider_polygon import PolygonHistoricalProvider
 from data.provider_yfinance import _bs_price, _implied_vol
 
 _ET = ZoneInfo("America/New_York")
+_NYSE_CLOSE = time(16, 0)
+_SECONDS_PER_YEAR = 365.0 * 86400.0
 
 # Résolutions disponibles pour le replay intraday : label → (multiplier, timespan Polygon)
 RESOLUTIONS: dict[str, tuple[int, str]] = {
@@ -235,15 +237,25 @@ def compute_iv_at_replay_point(
     avec l'IV réelle observée du marché (au lieu de l'IV figée à l'entrée), sans
     appel API supplémentaire — on consomme les leg_values déjà fetchées.
 
+    Résolution intraday : si `point.date` est un datetime, TTE = secondes jusqu'à
+    16h ET le jour d'expi / (365 × 86400). Sinon (replay daily), TTE = days / 365.
+    Critique pour le jour d'expi des shorts en intraday — sans cette résolution,
+    TTE.days = 0 et la bisection retourne 0 (fallback IV entrée).
+
     Fallback : si prix invalide (≤0), TTE expiré, ou bisection hors bornes
     [0.01, 5.0], on garde `leg.implied_vol` (IV entrée) pour ce leg.
     """
-    pt_date = point.date.date() if isinstance(point.date, datetime) else point.date
+    is_intraday = isinstance(point.date, datetime)
     iv_per_leg: dict[str, float] = {}
     for leg in legs:
         sym = leg.contract_symbol
         v = point.leg_values.get(sym, 0.0)
-        tte = max(0.0, (leg.expiration - pt_date).days / 365.0)
+        if is_intraday:
+            exp_close_dt = datetime.combine(leg.expiration, _NYSE_CLOSE)
+            tte = max(0.0, (exp_close_dt - point.date).total_seconds()
+                      / _SECONDS_PER_YEAR)
+        else:
+            tte = max(0.0, (leg.expiration - point.date).days / 365.0)
         iv = leg.implied_vol
         if v > 0 and tte > 0 and point.spot > 0:
             iv_raw = _implied_vol(leg.option_type, v, point.spot,
