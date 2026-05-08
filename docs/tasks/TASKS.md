@@ -13,9 +13,10 @@
 
 ## FEAT-029 — Backtest de validation du ranking
 
-- [ ] `scripts/validate_ranking.py` — orchestrateur (boucle variants × symbols × dates)
-- [ ] Variantes : `current`, `days_bc_0`, `days_bc_5`, `bs_eur`, `iv_calibrated`, `random`
-- [ ] Sortie : CSV brut + summary + scatters PNG + rapport Markdown
+- [x] `scripts/validate_ranking.py` — orchestrateur (boucle variants × symbols × dates)
+- [x] Variantes : `current`, `days_bc_0`, `days_bc_5`, `bs_eur`, `iv_calibrated`, `random`
+- [x] Sortie : CSV brut + summary + scatters PNG + rapport Markdown
+- [x] `run_backtest_scan` headless via `progress_callback` (sans st.progress)
 - [ ] Lancement ANQA (ETA ~3 h)
 - [ ] Décision : adopter / ne pas adopter chaque variante selon les chiffres
 

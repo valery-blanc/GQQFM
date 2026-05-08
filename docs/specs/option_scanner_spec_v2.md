@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-028 (2026-05-08)
+> Version : FEAT-029 (2026-05-08)
 
 ## 1. Vue d'ensemble
 
@@ -1119,13 +1119,17 @@ options-scanner/
 │   │   └── combo_detail.py      # Détails d'une combinaison
 │   └── styles.css               # Styles custom Streamlit
 │
-└── tests/
-    ├── conftest.py               # Fixtures communes (backend CPU forcé par défaut)
-    ├── test_black_scholes.py    # Validation BS vs valeurs de référence (CPU)
-    ├── test_pnl.py              # Cas de test P&L connus (CPU)
-    ├── test_combinator.py       # Vérification des contraintes
-    ├── test_scoring.py          # Vérification des filtres
-    └── test_gpu.py              # Cohérence GPU vs CPU (@pytest.mark.gpu, optionnel)
+├── tests/
+│   ├── conftest.py               # Fixtures communes (backend CPU forcé par défaut)
+│   ├── test_black_scholes.py    # Validation BS vs valeurs de référence (CPU)
+│   ├── test_pnl.py              # Cas de test P&L connus (CPU)
+│   ├── test_combinator.py       # Vérification des contraintes
+│   ├── test_scoring.py          # Vérification des filtres
+│   └── test_gpu.py              # Cohérence GPU vs CPU (@pytest.mark.gpu, optionnel)
+│
+└── scripts/
+    ├── diag_pnl_gap.py           # Diag ecart P&L theorique vs replay (FEAT-028)
+    └── validate_ranking.py       # Validation empirique du ranking (FEAT-029)
 ```
 
 ---
@@ -1368,6 +1372,24 @@ pas dans `config.py`. `config.py` ne contient que les constantes moteur.
     pour les legs concernés.
   - Helper : `backtesting.replay.compute_iv_at_replay_point(point, legs, rate)`
   - Fichiers : `backtesting/replay.py`, `ui/components/chart.py`, `ui/page_backtest.py`
+- ✅ Validation empirique du ranking (FEAT-029)
+  - **Objectif** : mesurer si le top-K du score composite est *predictif* du
+    P&L reel ex-post, et identifier quelles variantes du moteur (`days_before_close`,
+    pricer americain, vol band) ameliorent la calibration.
+  - **Outil** : `scripts/validate_ranking.py` — orchestrateur headless qui
+    boucle 6 variantes × 3 symbols × 30 dates × 10 combos top-K et compare
+    `pnl_pred_at_real_spot` (theorique conditionne sur le spot reellement
+    observe) au `pnl_real` (replay Polygon journalier).
+  - **Variantes** : `current`, `days_bc_0`, `days_bc_5`, `bs_eur`,
+    `iv_calibrated` (vol_low/high = p10/p90 HV30 sur 1 an), `random` (baseline).
+  - **Metriques** : Spearman ρ rang↔real, Top-K mean return, Hit rate, MAE,
+    Bias signe, Calibration ratio.
+  - **Sortie** : `scripts/output/{validation_full.csv, validation_summary.csv,
+    validation_scatter_<variant>.png, validation_report.md}`.
+  - **Mode headless** : `run_backtest_scan(...progress_callback=...)` ; si
+    fourni, on saute les `st.progress`/`st.empty()` (utilisable depuis script).
+  - **Cache** : `current` et `random` partagent le meme scan (memes params,
+    pick aleatoire vs trie) — economie de 90 scans sur 540.
 - Multi-ticker backtest (actuellement limité au 1er ticker)
 - Export CSV des résultats de backtest
 

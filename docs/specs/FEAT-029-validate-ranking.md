@@ -1,6 +1,6 @@
 # FEAT-029 — Backtest de validation du ranking
 
-**Status:** SPEC
+**Status:** IMPL (script pret a tourner sur ANQA, resultats non analyses)
 **Date:** 2026-05-08
 
 ## Context
@@ -221,6 +221,22 @@ le pricer.
 - **Effet régime de marché** : 18 mois de bull-run vs marché calme donneraient
   des conclusions différentes. Les 30 dates doivent inclure au moins 1 épisode
   de stress (correction, FOMC hawkish, earnings season).
+
+## Implementation
+
+- `scripts/validate_ranking.py` — orchestrateur (boucle `variants × symbols × dates`).
+- `ui/page_backtest.py:run_backtest_scan` accepte un `progress_callback` optionnel
+  pour le mode headless (script hors Streamlit). Pas de changement de
+  comportement dans l'UI : si `progress_callback=None`, fallback sur `st.progress`.
+- Cache de scan : `current` et `random` partagent les memes params, donc le
+  meme scan est reutilise (pick aleatoire au lieu du top-K trie).
+- Variante `iv_calibrated` : recupere les closes Polygon 1 an avant `as_of`,
+  calcule la HV30 rolling, prend p10/p90 et les utilise comme `vol_low`/`vol_high`
+  (rapportes a la HV30 courante).
+- Filtre dans le rapport : les points replay en mode `theoretical` ou `no_data`
+  sont exclus du calcul des metriques (P&L non observe).
+- Sortie : `scripts/output/{validation_full.csv, validation_summary.csv,
+  validation_scatter_<variant>.png, validation_report.md}`.
 
 ## Vérification
 

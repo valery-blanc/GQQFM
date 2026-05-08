@@ -37,8 +37,17 @@ def _make_progress_callback(bar, status):
     return cb
 
 
-def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
-    """Pipeline scan complet sur une date passée via Massive (ex-Polygon)."""
+def run_backtest_scan(
+    params: dict,
+    symbol: str,
+    as_of: date,
+    progress_callback=None,
+) -> dict:
+    """Pipeline scan complet sur une date passée via Massive (ex-Polygon).
+
+    progress_callback : si fourni, utilisé en mode headless (scripts hors Streamlit) ;
+    sinon une progress bar Streamlit + status.empty() sont créés.
+    """
     from data.risk_free_rate import fetch_historical_risk_free_rate
 
     criteria = params["criteria"]
@@ -50,9 +59,13 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
     rfr, rfr_src = fetch_historical_risk_free_rate(as_of)
 
     time_label = f" @ {scan_time} ET" if scan_time else " (EOD)"
-    bar = st.progress(0.0, text=f"[{symbol} @ {as_of}{time_label}] Initialisation…")
-    status = st.empty()
-    cb = _make_progress_callback(bar, status)
+    if progress_callback is not None:
+        bar = status = None
+        cb = progress_callback
+    else:
+        bar = st.progress(0.0, text=f"[{symbol} @ {as_of}{time_label}] Initialisation…")
+        status = st.empty()
+        cb = _make_progress_callback(bar, status)
     t_start = time.perf_counter()
 
     cb(0.0, f"^IRX {as_of}: {rfr*100:.3f}% ({rfr_src})")
@@ -83,8 +96,8 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
         all_combinations.extend(combos)
 
     if not all_combinations:
-        bar.empty()
-        status.empty()
+        if bar is not None: bar.empty()
+        if status is not None: status.empty()
         return {"error": "Aucune combinaison générée. Élargissez les plages DTE ou changez de date."}
 
     cb(0.98, f"Calcul scan ({len(all_combinations):,} combinaisons)…")
@@ -126,8 +139,8 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
     valid_indices_cpu = to_cpu(valid_indices)
 
     if len(valid_indices_cpu) == 0:
-        bar.empty()
-        status.empty()
+        if bar is not None: bar.empty()
+        if status is not None: status.empty()
         return {
             "combinations": [], "metrics": [], "n_tested": len(all_combinations),
             "n_found": 0, "gpu_time_s": time.perf_counter() - t_start,
@@ -202,8 +215,8 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
     pnl_filtered_np = to_cpu(pnl_filtered)[:, order, :]
 
     cb(1.0, f"Scan terminé — {len(filtered_combos)} combos retenues")
-    bar.empty()
-    status.empty()
+    if bar is not None: bar.empty()
+    if status is not None: status.empty()
 
     return {
         "combinations": filtered_combos,
@@ -220,6 +233,7 @@ def run_backtest_scan(params: dict, symbol: str, as_of: date) -> dict:
         "provider": provider,
         "days_before_close": params.get("days_before_close", 3),
         "realistic_range_pct": None,  # désormais per-combo dans metrics[i]
+        "rfr": rfr,
     }
 
 
