@@ -392,6 +392,111 @@ def _plot_replay_hourly(points, combo, as_of, resolution: str = "1h") -> go.Figu
     return fig
 
 
+def _render_replay_section(combo, idx: int, as_of, results: dict, params: dict) -> None:
+    """Replay historique — partagé entre vue unique et vue grille."""
+    st.markdown("---")
+    st.subheader("Replay historique")
+
+    default_days = max(5, min(60, (combo.close_date - as_of).days))
+    slider_key = f"bt_days_{idx}_{combo.close_date}"
+    days_forward = st.slider("Jours à replayer", 5, 60, default_days, 1, key=slider_key)
+
+    resolution = st.selectbox(
+        "Résolution intraday",
+        options=list(RESOLUTIONS.keys()),
+        index=0,
+        format_func={"1h": "1 heure", "15min": "15 minutes", "5min": "5 minutes"}.get,
+        key=f"bt_resolution_{idx}_{combo.close_date}",
+        help="Précision des barres pour le replay intraday (underlying + legs).",
+    )
+
+    col_b1, col_b2 = st.columns(2)
+    launch_daily = col_b1.button("Lancer le replay (journalier)", type="primary",
+                                  use_container_width=True)
+    launch_hourly = col_b2.button(f"Lancer le replay ({resolution})", type="secondary",
+                                   use_container_width=True)
+
+    if launch_daily:
+        bar = st.progress(0.0, text="Replay journalier…")
+        status = st.empty()
+        cb = _make_progress_callback(bar, status)
+        try:
+            points = backtest_combo(
+                combo, as_of=as_of, days_forward=days_forward,
+                provider=results["provider"], rate=params["risk_free_rate"],
+                progress_callback=cb,
+            )
+            st.session_state.bt_replay = ("daily", points)
+        except Exception as exc:
+            st.error(f"Erreur replay : {exc}")
+        finally:
+            bar.empty()
+            status.empty()
+
+    if launch_hourly:
+        bar = st.progress(0.0, text="Replay horaire…")
+        status = st.empty()
+        cb = _make_progress_callback(bar, status)
+        try:
+            points = backtest_combo_hourly(
+                combo, as_of=as_of, days_forward=days_forward,
+                provider=results["provider"], rate=params["risk_free_rate"],
+                progress_callback=cb, resolution=resolution,
+            )
+            st.session_state.bt_replay = (resolution, points)
+        except Exception as exc:
+            st.error(f"Erreur replay horaire : {exc}")
+        finally:
+            bar.empty()
+            status.empty()
+
+    replay_state = st.session_state.bt_replay
+    if replay_state:
+        replay_mode, points = replay_state
+        if replay_mode in RESOLUTIONS:
+            replay_fig = _plot_replay_hourly(points, combo, as_of, resolution=replay_mode)
+        else:
+            replay_fig = _plot_replay(points, combo, as_of)
+        st.plotly_chart(replay_fig, use_container_width=True)
+
+        final = points[-1]
+        peak = max(points, key=lambda p: p.pnl_dollar)
+        trough = min(points, key=lambda p: p.pnl_dollar)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("P&L final", f"${final.pnl_dollar:+,.2f}", f"{final.pnl_pct:+.2f}%")
+        col2.metric("Peak P&L", f"${peak.pnl_dollar:+,.2f}",
+                    f"{peak.pnl_pct:+.2f}% @ {peak.date.strftime('%d/%m')}")
+        col3.metric("Worst P&L", f"${trough.pnl_dollar:+,.2f}",
+                    f"{trough.pnl_pct:+.2f}% @ {trough.date.strftime('%d/%m')}")
+
+        from collections import Counter
+        mode_counts = Counter(p.mode for p in points)
+        total_pts = len(points)
+        n_mkt = mode_counts.get("market", 0)
+        n_theo = mode_counts.get("theoretical", 0) + mode_counts.get("mixed", 0)
+        n_exp = mode_counts.get("expired", 0)
+        st.caption(
+            f"Fiabilité replay — "
+            f"Market (prix réels) : **{n_mkt}/{total_pts} ({100*n_mkt//max(total_pts,1)}%)** | "
+            f"Theoretical (BS IV figée) : **{n_theo}/{total_pts} ({100*n_theo//max(total_pts,1)}%)** | "
+            f"Expiré : {n_exp}"
+        )
+
+        is_intraday = replay_mode in RESOLUTIONS
+        label_col = f"Date/Heure ({replay_mode})" if is_intraday else "Date"
+        with st.expander(f"Détail {'barre par barre' if is_intraday else 'jour par jour'}"):
+            import pandas as pd
+            fmt = "%d/%m %Hh%M" if is_intraday else "%Y-%m-%d"
+            df = pd.DataFrame([{
+                label_col: p.date.strftime(fmt),
+                "Spot": f"${p.spot:.2f}",
+                "P&L $": f"{p.pnl_dollar:+,.2f}",
+                "P&L %": f"{p.pnl_pct:+.2f}%",
+                "Mode": p.mode,
+            } for p in points])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+
 def render_backtest_page(base_params: dict) -> None:
     """Page principale du backtest."""
     from datetime import date as _date, timedelta as _td
@@ -572,7 +677,6 @@ def render_backtest_page(base_params: dict) -> None:
     if view_mode == "Grille":
         _render_grid(results, "bt", params)
         st.markdown("---")
-        from ui.components.results_table import render_results_table
         sel_tbl = render_results_table(
             results["combinations"], results["metrics"],
             results.get("symbols"),
@@ -585,6 +689,9 @@ def render_backtest_page(base_params: dict) -> None:
         st.markdown("---")
         _render_grid_details_compact(results, "bt_selected_idx",
                                      days_before_close=dbc_bt, as_of=as_of)
+        grid_idx = min(st.session_state.get("bt_selected_idx", 0), results["n_found"] - 1)
+        _render_replay_section(results["combinations"][grid_idx], grid_idx,
+                               as_of, results, params)
         return
 
     # ── Vue unique ─────────────────────────────────────────────────────────
@@ -634,106 +741,4 @@ def render_backtest_page(base_params: dict) -> None:
         days_before_close=results.get("days_before_close", 3),
     )
 
-    # ── Replay ───────────────────────────────────────────────────────────────
-    st.markdown("---")
-    st.subheader("Replay historique")
-
-    default_days = max(5, min(60, (combo.close_date - as_of).days))
-    slider_key = f"bt_days_{idx}_{combo.close_date}"
-    days_forward = st.slider("Jours à replayer", 5, 60, default_days, 1, key=slider_key)
-
-    resolution = st.selectbox(
-        "Résolution intraday",
-        options=list(RESOLUTIONS.keys()),
-        index=0,
-        format_func={"1h": "1 heure", "15min": "15 minutes", "5min": "5 minutes"}.get,
-        key=f"bt_resolution_{idx}_{combo.close_date}",
-        help="Précision des barres pour le replay intraday (underlying + legs).",
-    )
-
-    col_b1, col_b2 = st.columns(2)
-    launch_daily = col_b1.button("Lancer le replay (journalier)", type="primary",
-                                  use_container_width=True)
-    launch_hourly = col_b2.button(f"Lancer le replay ({resolution})", type="secondary",
-                                   use_container_width=True)
-
-    if launch_daily:
-        bar = st.progress(0.0, text="Replay journalier…")
-        status = st.empty()
-        cb = _make_progress_callback(bar, status)
-        try:
-            points = backtest_combo(
-                combo, as_of=as_of, days_forward=days_forward,
-                provider=results["provider"], rate=params["risk_free_rate"],
-                progress_callback=cb,
-            )
-            st.session_state.bt_replay = ("daily", points)
-        except Exception as exc:
-            st.error(f"Erreur replay : {exc}")
-        finally:
-            bar.empty()
-            status.empty()
-
-    if launch_hourly:
-        bar = st.progress(0.0, text="Replay horaire…")
-        status = st.empty()
-        cb = _make_progress_callback(bar, status)
-        try:
-            points = backtest_combo_hourly(
-                combo, as_of=as_of, days_forward=days_forward,
-                provider=results["provider"], rate=params["risk_free_rate"],
-                progress_callback=cb, resolution=resolution,
-            )
-            st.session_state.bt_replay = (resolution, points)
-        except Exception as exc:
-            st.error(f"Erreur replay horaire : {exc}")
-        finally:
-            bar.empty()
-            status.empty()
-
-    replay_state = st.session_state.bt_replay
-    if replay_state:
-        replay_mode, points = replay_state
-        if replay_mode in RESOLUTIONS:
-            replay_fig = _plot_replay_hourly(points, combo, as_of, resolution=replay_mode)
-        else:
-            replay_fig = _plot_replay(points, combo, as_of)
-        st.plotly_chart(replay_fig, use_container_width=True)
-
-        final = points[-1]
-        peak = max(points, key=lambda p: p.pnl_dollar)
-        trough = min(points, key=lambda p: p.pnl_dollar)
-        col1, col2, col3 = st.columns(3)
-        col1.metric("P&L final", f"${final.pnl_dollar:+,.2f}", f"{final.pnl_pct:+.2f}%")
-        col2.metric("Peak P&L", f"${peak.pnl_dollar:+,.2f}",
-                    f"{peak.pnl_pct:+.2f}% @ {peak.date.strftime('%d/%m')}")
-        col3.metric("Worst P&L", f"${trough.pnl_dollar:+,.2f}",
-                    f"{trough.pnl_pct:+.2f}% @ {trough.date.strftime('%d/%m')}")
-
-        # Ratio market / theoretical
-        from collections import Counter
-        mode_counts = Counter(p.mode for p in points)
-        total_pts = len(points)
-        n_mkt = mode_counts.get("market", 0)
-        n_theo = mode_counts.get("theoretical", 0) + mode_counts.get("mixed", 0)
-        n_exp = mode_counts.get("expired", 0)
-        st.caption(
-            f"Fiabilité replay — "
-            f"Market (prix réels) : **{n_mkt}/{total_pts} ({100*n_mkt//max(total_pts,1)}%)** | "
-            f"Theoretical (BS IV figée) : **{n_theo}/{total_pts} ({100*n_theo//max(total_pts,1)}%)** | "
-            f"Expiré : {n_exp}"
-        )
-
-        is_intraday = replay_mode in RESOLUTIONS
-        label_col = f"Date/Heure ({replay_mode})" if is_intraday else "Date"
-        with st.expander(f"Détail {'barre par barre' if is_intraday else 'jour par jour'}"):
-            import pandas as pd
-            fmt = "%d/%m %Hh%M" if is_intraday else "%Y-%m-%d"
-            df = pd.DataFrame([{
-                label_col: p.date.strftime(fmt),
-                "Spot": f"${p.spot:.2f}",
-                "P&L $": f"{p.pnl_dollar:+,.2f}",
-                "P&L %": f"{p.pnl_pct:+.2f}%",
-                "Mode": p.mode,
-            } for p in points])
-            st.dataframe(df, use_container_width=True, hide_index=True)
+    _render_replay_section(combo, idx, as_of, results, params)
