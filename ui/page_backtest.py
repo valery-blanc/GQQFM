@@ -423,9 +423,27 @@ def _render_dynamic_profile_at_cursor(
 
     cursor_key = f"bt_replay_cursor_{idx}_{combo.close_date}"
     n = len(points)
+    # Défaut = dernier point en mode "market" (alignement marché possible).
+    # Si tout le replay est theoretical/expired → tombe sur le dernier point.
+    default_idx = n - 1
+    for i in range(n - 1, -1, -1):
+        if points[i].mode == "market":
+            default_idx = i
+            break
+
+    def _fmt(p):
+        return (p.date.strftime("%d/%m %Hh%M")
+                if isinstance(p.date, datetime)
+                else p.date.strftime("%d/%m"))
+
     cursor_idx = st.slider(
-        "Instant du replay", min_value=0, max_value=n - 1, value=n - 1,
+        f"Instant du replay (0 = {_fmt(points[0])} → {n-1} = {_fmt(points[-1])})",
+        min_value=0, max_value=n - 1, value=default_idx,
         key=cursor_key,
+        help="Défaut = dernier point en mode 'market' (avec prix réels). "
+             "Glisse pour explorer les autres instants. Les points en mode "
+             "'theoretical' utilisent BS avec IV figée → marker tombe sur "
+             "la courbe par construction (pas un test FEAT-028 valide).",
     )
     pt = points[cursor_idx]
     pt_date = pt.date.date() if isinstance(pt.date, datetime) else pt.date
@@ -483,11 +501,19 @@ def _render_dynamic_profile_at_cursor(
     )
 
     col_info, col_meta = st.columns([3, 2])
+    mode_warn = ""
+    if pt.mode != "market":
+        mode_warn = (
+            f"  \n⚠ Mode `{pt.mode}` à cet instant : au moins un leg n'a pas de prix "
+            f"marché Polygon, le replay utilise BS avec IV figée → IV non recalculées, "
+            f"alignement marker-courbe trivial. Choisis un instant en mode `market` "
+            f"pour tester FEAT-028."
+        )
     col_info.markdown(
         f"**Instant** : {pt_label}  \n"
         f"**Spot** : ${pt.spot:.2f}  \n"
         f"**P&L observé** : {pt.pnl_pct:+.2f}% (${pt.pnl_dollar:+,.0f})  \n"
-        f"**Mode** : {pt.mode}"
+        f"**Mode** : {pt.mode}{mode_warn}"
     )
     iv_lines = []
     for leg in combo.legs:

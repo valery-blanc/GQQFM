@@ -224,6 +224,27 @@ def main() -> None:
     )
     pct_C = pnl_C_dollar / nd_abs * 100
 
+    # -- Methode C' : meme que C mais rate = DEFAULT_RISK_FREE_RATE (4.5%) --
+    # (= ce que params["risk_free_rate"] vaut par defaut dans la sidebar)
+    DEFAULT_RFR = 0.045
+    legs_Cp = []
+    for le in legs_entry:
+        sym = le.contract_symbol
+        v_market = point_obs.leg_values.get(sym, 0.0)
+        tte = max(0.0, (le.expiration - OBS_DATE).days / 365.0)
+        iv_Cp = le.implied_vol
+        if v_market > 0 and tte > 0:
+            iv_raw = _implied_vol(le.option_type, v_market, point_obs.spot,
+                                  le.strike, tte, DEFAULT_RFR)
+            if 0.01 <= iv_raw <= 5.0:
+                iv_Cp = iv_raw
+        legs_Cp.append(replace(le, implied_vol=iv_Cp))
+    combo_Cp = _build_combo(legs_Cp)
+    pnl_Cp_dollar = _theoretical_pnl_at_spot(
+        combo_Cp, point_obs.spot, days_before_close=days_bc_today, rate=DEFAULT_RFR,
+    )
+    pct_Cp = pnl_Cp_dollar / nd_abs * 100
+
     # -- Affichage ----------------------------------------------------------
     print(f"{'Leg':<25} {'entry $':>10} {'IV ent.':>9}   {'$ 24/04':>10} {'IV 24/04':>9}")
     print("-" * 72)
@@ -253,6 +274,8 @@ def main() -> None:
           f"{pct_B:+7.2f} %  ({pnl_B_dollar:+8.2f} $)")
     print(f"P&L theorique C (IV 24/04, today=24/04)          : "
           f"{pct_C:+7.2f} %  ({pnl_C_dollar:+8.2f} $)")
+    print(f"P&L theorique C' (IV 24/04, today=24/04, RFR={DEFAULT_RFR*100:.1f}%) : "
+          f"{pct_Cp:+7.2f} %  ({pnl_Cp_dollar:+8.2f} $)")
     print()
 
     # -- Decomposition de l'ecart -----------------------------------------
