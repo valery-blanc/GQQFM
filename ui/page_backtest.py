@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import statistics
 import time
-from datetime import date
+from dataclasses import replace
+from datetime import date, datetime
 
 import numpy as np
 import plotly.graph_objects as go
@@ -12,6 +13,8 @@ import streamlit as st
 
 import config
 from backtesting import backtest_combo, backtest_combo_hourly, RESOLUTIONS
+from backtesting.replay import compute_iv_at_replay_point
+from data.models import Combination
 from data.provider_polygon import PolygonHistoricalProvider, resolve_polygon_key
 from engine.backend import to_cpu, xp
 from engine.combinator import generate_combinations
@@ -392,6 +395,115 @@ def _plot_replay_hourly(points, combo, as_of, resolution: str = "1h") -> go.Figu
     return fig
 
 
+def _render_dynamic_profile_at_cursor(
+    points: list, combo, idx: int, params: dict, results: dict,
+) -> None:
+    """FEAT-028 — Profil P&L théorique recalculé à l'instant choisi via curseur,
+    avec marker du P&L observé superposé.
+
+    Pour le point sélectionné :
+      - days_before_close = (close_date − today).days (au lieu de 3 figé)
+      - IV par leg = bisection BS depuis point.leg_values (au lieu de IV entrée figée)
+      - re-render plot_pnl_profile avec observed_point=(point.spot, point.pnl_pct)
+
+    Si pricer + IV refetched cohérents, le marker tombe sur la courbe → l'écart
+    statique courbe-vs-replay disparaît à l'instant choisi.
+    """
+    if not points:
+        return
+
+    st.markdown("---")
+    st.subheader("Profil P&L théorique recalculé à l'instant choisi")
+    st.caption(
+        "FEAT-028 — la courbe est rebâtie pour `today = curseur` avec l'IV implicite "
+        "de chaque leg recalculée depuis les prix marché du replay. L'étoile jaune = "
+        "P&L observé : doit poser sur la courbe si le marché valorise le combo "
+        "comme prévu par BS américain."
+    )
+
+    cursor_key = f"bt_replay_cursor_{idx}_{combo.close_date}"
+    n = len(points)
+    cursor_idx = st.slider(
+        "Instant du replay", min_value=0, max_value=n - 1, value=n - 1,
+        key=cursor_key,
+    )
+    pt = points[cursor_idx]
+    pt_date = pt.date.date() if isinstance(pt.date, datetime) else pt.date
+    pt_label = (pt.date.strftime("%d/%m/%Y %Hh%M ET")
+                if isinstance(pt.date, datetime)
+                else pt.date.strftime("%d/%m/%Y"))
+
+    rate = params["risk_free_rate"]
+    iv_per_leg = compute_iv_at_replay_point(pt, combo.legs, rate)
+    legs_dyn = [
+        replace(l, implied_vol=iv_per_leg.get(l.contract_symbol, l.implied_vol))
+        for l in combo.legs
+    ]
+    combo_dyn = Combination(
+        legs=legs_dyn,
+        net_debit=combo.net_debit,
+        close_date=combo.close_date,
+        template_name=combo.template_name,
+        event_score_factor=combo.event_score_factor,
+        events_in_sweet_zone=combo.events_in_sweet_zone,
+        event_warning=combo.event_warning,
+    )
+
+    days_bc = max(0, (combo.close_date - pt_date).days)
+    spot_range = xp.linspace(
+        pt.spot * config.SPOT_RANGE_LOW,
+        pt.spot * config.SPOT_RANGE_HIGH,
+        config.NUM_SPOT_POINTS,
+        dtype=xp.float32,
+    )
+    vol_scenarios = [params["vol_low"], 1.0, params["vol_high"]]
+    tensor = combinations_to_tensor([combo_dyn], days_before_close=days_bc)
+    pnl_tensor = compute_pnl_batch(
+        tensor, spot_range, vol_scenarios, rate,
+        use_american_pricer=params.get("use_american_pricer", True),
+    )
+    pnl_2d = to_cpu(pnl_tensor)[:, 0, :]            # (V, M)
+    spot_range_cpu = to_cpu(spot_range)
+    pnl_mid = pnl_2d[config.VOL_MEDIAN_INDEX]
+    nd_abs = abs(combo.net_debit) if abs(combo.net_debit) > 1.0 else 1.0
+    max_loss_pct = float(pnl_mid.min()) / nd_abs * 100
+    max_gain_pct = float(pnl_mid.max()) / nd_abs * 100
+
+    symbol = results.get("symbol")
+    fig = plot_pnl_profile(
+        combination=combo_dyn,
+        pnl_tensor=pnl_2d,
+        spot_range=spot_range_cpu,
+        current_spot=pt.spot,
+        loss_prob=0.0,           # non recalculé pour le profil dynamique
+        max_loss_pct=max_loss_pct,
+        max_gain_pct=max_gain_pct,
+        symbol=symbol,
+        observed_point=(pt.spot, pt.pnl_pct),
+    )
+
+    col_info, col_meta = st.columns([3, 2])
+    col_info.markdown(
+        f"**Instant** : {pt_label}  \n"
+        f"**Spot** : ${pt.spot:.2f}  \n"
+        f"**P&L observé** : {pt.pnl_pct:+.2f}% (${pt.pnl_dollar:+,.0f})  \n"
+        f"**Mode** : {pt.mode}"
+    )
+    iv_lines = []
+    for leg in combo.legs:
+        sign = "L" if leg.direction > 0 else "S"
+        iv_old = leg.implied_vol * 100
+        iv_new = iv_per_leg.get(leg.contract_symbol, leg.implied_vol) * 100
+        iv_lines.append(
+            f"{sign}{leg.quantity} {leg.option_type} {leg.strike:g} "
+            f"{leg.expiration.strftime('%d%b').upper()} : "
+            f"IV {iv_old:.1f}% → **{iv_new:.1f}%**"
+        )
+    col_meta.markdown("**IV par leg (entrée → instant)**  \n" + "  \n".join(iv_lines))
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def _render_replay_section(combo, idx: int, as_of, results: dict, params: dict) -> None:
     """Replay historique — partagé entre vue unique et vue grille."""
     st.markdown("---")
@@ -469,6 +581,9 @@ def _render_replay_section(combo, idx: int, as_of, results: dict, params: dict) 
             f"Theoretical (BS IV figée) : **{n_theo}/{total_pts} ({100*n_theo//max(total_pts,1)}%)** | "
             f"Expiré : {n_exp}"
         )
+
+        # ── FEAT-028 : Profil P&L recalculé à l'instant choisi ──────────────
+        _render_dynamic_profile_at_cursor(points, combo, idx, params, results)
 
         is_intraday = replay_mode in RESOLUTIONS
         label_col = f"Date/Heure ({replay_mode})" if is_intraday else "Date"

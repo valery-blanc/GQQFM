@@ -1,6 +1,6 @@
 # Options P&L Profile Scanner — Spécifications Techniques
 
-> Version : FEAT-027 (2026-05-07)
+> Version : FEAT-028 (2026-05-08)
 
 ## 1. Vue d'ensemble
 
@@ -1347,6 +1347,27 @@ pas dans `config.py`. `config.py` ne contient que les constantes moteur.
   - Hover pré-formaté en strings Python (contourne bug format specifier Plotly)
   - Slider jours par défaut = `close_date - as_of` (durée réelle de la jambe courte)
   - Clé slider unique par combo (reset garanti au changement de combo)
+- ✅ Profil P&L théorique aligné au replay (FEAT-028) — résout l'écart "vega non capturé"
+  - **Symptôme** : la courbe P&L vs spot était figée à l'entrée (IV figée, `exit_date = close_date − 3j`).
+    Pendant le replay, le P&L observé pouvait différer de 20+ pts du P&L théorique au même spot
+    car l'IV de marché avait bougé (vol expansion non modélisée).
+  - **Diagnostic** (`scripts/diag_pnl_gap.py`) : sur QQQ Double Calendar 2/3 entrée 2026-04-15,
+    écart de 20.6 pts au 24/04 dont 22.2 pts attribuables au vega ; theta négligeable ;
+    pricer BJS américain reproduit le marché à 0.03 pt près une fois IV refetched.
+  - **Solution** : sous le graphe replay, un slider sélectionne un instant ; le profil P&L est
+    rebâti pour cet instant avec :
+    - `today = point.date` → `days_before_close = max(0, (close_date − today).days)`
+    - IV par leg = bisection BS depuis `point.leg_values[contract_symbol]` (consomme le replay
+      déjà fetché — aucun appel API supplémentaire)
+    - 3 scénarios vol (`vol_low / 1.0 / vol_high`) recalculés autour du nouveau spot
+  - **Marker P&L observé** (`observed_point` kwarg de `plot_pnl_profile`) : étoile jaune posée
+    à `(point.spot, point.pnl_pct)`. Doit tomber **sur** la courbe à <0.1 pt — c'est le test
+    visuel d'alignement pricer-vs-marché.
+  - **Mode dégradé** : si un leg est en mode `theoretical` ou `expired` au point sélectionné,
+    son IV reste celle de l'entrée (fallback) — comportement strictement identique à pré-FEAT-028
+    pour les legs concernés.
+  - Helper : `backtesting.replay.compute_iv_at_replay_point(point, legs, rate)`
+  - Fichiers : `backtesting/replay.py`, `ui/components/chart.py`, `ui/page_backtest.py`
 - Multi-ticker backtest (actuellement limité au 1er ticker)
 - Export CSV des résultats de backtest
 
@@ -1354,7 +1375,9 @@ pas dans `config.py`. `config.py` ne contient que les constantes moteur.
 - IBKR / Tradier live data
 - Alertes en temps réel (scanner en continu)
 - Gestion du smile de volatilité (vol surface au lieu d'une seule vol ATM)
-- Reconstruction IV jour par jour dans le replay (actuellement IV figée à l'entrée)
+- ~~Reconstruction IV jour par jour dans le replay~~ ✓ **résolu par FEAT-028**
+  (curseur replay → profil P&L recalculé avec IV implicite refetched depuis
+  `point.leg_values`, sans appel API supplémentaire)
 
 ---
 

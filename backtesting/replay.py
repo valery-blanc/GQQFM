@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import config
 from data.models import Combination, Leg
 from data.provider_polygon import PolygonHistoricalProvider
-from data.provider_yfinance import _bs_price
+from data.provider_yfinance import _bs_price, _implied_vol
 
 _ET = ZoneInfo("America/New_York")
 
@@ -221,6 +221,37 @@ def _aggregate_mode(leg_modes: dict[str, str]) -> str:
     if modes <= {"theoretical", "expired"}:
         return "theoretical"
     return "mixed"
+
+
+def compute_iv_at_replay_point(
+    point: "BacktestPoint",
+    legs: list[Leg],
+    rate: float,
+) -> dict[str, float]:
+    """FEAT-028 — IV implicite par leg à la date du `point`, recalculée par bisection
+    BS européen depuis `point.leg_values[contract_symbol]`.
+
+    Permet de re-pricer le profil P&L théorique à n'importe quel instant du replay
+    avec l'IV réelle observée du marché (au lieu de l'IV figée à l'entrée), sans
+    appel API supplémentaire — on consomme les leg_values déjà fetchées.
+
+    Fallback : si prix invalide (≤0), TTE expiré, ou bisection hors bornes
+    [0.01, 5.0], on garde `leg.implied_vol` (IV entrée) pour ce leg.
+    """
+    pt_date = point.date.date() if isinstance(point.date, datetime) else point.date
+    iv_per_leg: dict[str, float] = {}
+    for leg in legs:
+        sym = leg.contract_symbol
+        v = point.leg_values.get(sym, 0.0)
+        tte = max(0.0, (leg.expiration - pt_date).days / 365.0)
+        iv = leg.implied_vol
+        if v > 0 and tte > 0 and point.spot > 0:
+            iv_raw = _implied_vol(leg.option_type, v, point.spot,
+                                  leg.strike, tte, rate)
+            if 0.01 <= iv_raw <= 5.0:
+                iv = iv_raw
+        iv_per_leg[sym] = iv
+    return iv_per_leg
 
 
 def backtest_combo(

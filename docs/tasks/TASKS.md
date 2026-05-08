@@ -1,5 +1,13 @@
 # TASKS
 
+## FEAT-028 — Alignement P&L théorique au replay
+
+- [ ] `backtesting/replay.py` — ajouter `compute_iv_at_replay_point()`
+- [ ] `ui/components/chart.py` — param `observed_point` sur `plot_pnl_profile`
+- [ ] `ui/page_backtest.py` — slider curseur + recalcul du profil P&L à l'instant choisi
+- [ ] `docs/specs/option_scanner_spec.md` — section replay : nouvelles capacités + retirer "IV historique" des limitations V3
+- [ ] Test local + déploiement ANQA + validation utilisateur
+
 ## Done
 
 - [x] config.py + requirements.txt + pyproject.toml

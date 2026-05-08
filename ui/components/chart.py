@@ -15,6 +15,7 @@ def plot_pnl_profile(
     max_loss_pct: float,
     max_gain_pct: float,
     symbol: str | None = None,
+    observed_point: tuple[float, float] | None = None,  # FEAT-028 : (spot, pnl_pct)
 ) -> go.Figure:
     """
     Génère le graphique P&L interactif Plotly.
@@ -93,6 +94,24 @@ def plot_pnl_profile(
             "P&L: %{y:.1f}% ($%{customdata[0]:,.0f})<extra></extra>"
         ),
     ))
+
+    # Marker P&L observé (FEAT-028)
+    if observed_point is not None:
+        obs_spot, obs_pnl_pct = observed_point
+        fig.add_trace(go.Scatter(
+            x=[obs_spot], y=[obs_pnl_pct],
+            mode="markers",
+            name="P&L observé (replay)",
+            marker=dict(
+                color="#FFD700", size=16, symbol="star",
+                line=dict(color="black", width=1.5),
+            ),
+            hovertemplate=(
+                f"P&L observé (replay)<br>"
+                f"Spot: ${obs_spot:.2f}<br>"
+                f"P&L: {obs_pnl_pct:+.2f}%<extra></extra>"
+            ),
+        ))
 
     # Ligne breakeven
     fig.add_hline(y=0, line=dict(color="gray", dash="dash", width=1))
