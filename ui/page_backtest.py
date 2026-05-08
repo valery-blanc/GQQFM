@@ -5,7 +5,7 @@ from __future__ import annotations
 import statistics
 import time
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import numpy as np
 import plotly.graph_objects as go
@@ -431,21 +431,33 @@ def _render_dynamic_profile_at_cursor(
             default_idx = i
             break
 
-    def _fmt(p):
-        return (p.date.strftime("%d/%m %Hh%M")
-                if isinstance(p.date, datetime)
-                else p.date.strftime("%d/%m"))
-
-    cursor_idx = st.slider(
-        f"Instant du replay (0 = {_fmt(points[0])} → {n-1} = {_fmt(points[-1])})",
-        min_value=0, max_value=n - 1, value=default_idx,
-        key=cursor_key,
-        help="Défaut = dernier point en mode 'market' (avec prix réels). "
-             "Glisse pour explorer les autres instants. Les points en mode "
-             "'theoretical' utilisent BS avec IV figée → marker tombe sur "
-             "la courbe par construction (pas un test FEAT-028 valide).",
-    )
-    pt = points[cursor_idx]
+    is_intraday = isinstance(points[0].date, datetime)
+    default_dt = points[default_idx].date
+    if is_intraday:
+        target_dt = st.slider(
+            "Instant du replay",
+            min_value=points[0].date,
+            max_value=points[-1].date,
+            value=default_dt,
+            step=timedelta(minutes=5),
+            format="DD/MM/YYYY HH:mm",
+            key=cursor_key,
+            help="Default = dernier point en mode 'market'. Glisse pour choisir "
+                 "n'importe quel instant entre l'entrée et la fin du replay.",
+        )
+        # Snap au point du replay le plus proche du target_dt
+        pt = min(points, key=lambda p: abs((p.date - target_dt).total_seconds()))
+    else:
+        target_d = st.slider(
+            "Instant du replay",
+            min_value=points[0].date,
+            max_value=points[-1].date,
+            value=default_dt,
+            step=timedelta(days=1),
+            format="DD/MM/YYYY",
+            key=cursor_key,
+        )
+        pt = min(points, key=lambda p: abs((p.date - target_d).days))
     pt_date = pt.date.date() if isinstance(pt.date, datetime) else pt.date
     pt_label = (pt.date.strftime("%d/%m/%Y %Hh%M ET")
                 if isinstance(pt.date, datetime)
