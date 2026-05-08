@@ -273,21 +273,55 @@ def _combo_id(combo) -> str:
     return "|".join(parts)
 
 
+# ── Checkpoint / resume ────────────────────────────────────────────────────────
+CSV_COLUMNS = [
+    "variant", "symbol", "as_of", "rank", "combo_id", "score",
+    "pnl_pred_at_real_spot", "pnl_real", "max_gain_real_pct_pred",
+    "spot_entry", "spot_exit", "days_to_close", "mode", "net_debit",
+]
+
+
+def _load_done_keys(csv_path: Path) -> set[tuple[str, str, str]]:
+    """Retourne l'ensemble des `(variant, symbol, as_of)` deja traites
+    (lus depuis le CSV de checkpoint si present)."""
+    if not csv_path.exists() or csv_path.stat().st_size == 0:
+        return set()
+    try:
+        df = pd.read_csv(csv_path, usecols=["variant", "symbol", "as_of"])
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] CSV illisible ({exc}), reset checkpoint", flush=True)
+        return set()
+    return {(str(r.variant), str(r.symbol), str(r.as_of))
+            for r in df.itertuples(index=False)}
+
+
+def _append_rows(rows: list[dict], csv_path: Path) -> None:
+    """Append des rows au CSV (cree avec header si absent)."""
+    if not rows:
+        return
+    df = pd.DataFrame(rows, columns=CSV_COLUMNS)
+    write_header = not csv_path.exists() or csv_path.stat().st_size == 0
+    df.to_csv(csv_path, index=False, mode="a", header=write_header)
+
+
 # ── Orchestration ──────────────────────────────────────────────────────────────
 def run_validation() -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    out_csv = OUTPUT_DIR / "validation_full.csv"
     rng = random.Random(RANDOM_SEED)
     provider = PolygonHistoricalProvider()
 
+    done_keys = _load_done_keys(out_csv)
     print(f"FEAT-029 validation : "
           f"{len(VARIANTS)} variantes x {len(SYMBOLS)} symbols "
           f"x {len(DATES_TO_TEST)} dates x {TOP_K} combos\n")
-    print(f"Output dir : {OUTPUT_DIR}\n")
+    print(f"Output dir : {OUTPUT_DIR}")
+    print(f"Checkpoint : {out_csv} ({len(done_keys)} (variant,symbol,as_of) deja traites)\n")
     print(f"Dates : {[d.isoformat() for d in DATES_TO_TEST]}\n")
 
     cache: dict[tuple, dict] = {}
-    rows: list[dict] = []
     t0 = time.perf_counter()
+    n_new_rows = 0
 
     n_steps = len(VARIANTS) * len(SYMBOLS) * len(DATES_TO_TEST)
     step = 0
@@ -296,6 +330,10 @@ def run_validation() -> Path:
             for as_of in DATES_TO_TEST:
                 step += 1
                 tag = f"[{step}/{n_steps}] {variant} / {symbol} / {as_of}"
+                key3 = (variant, symbol, as_of.isoformat())
+                if key3 in done_keys:
+                    print(f"{tag}  [resume skip]", flush=True)
+                    continue
                 print(tag, flush=True)
                 params = _build_params(cfg, symbol, as_of, provider)
                 key = (symbol, as_of, _params_signature(params))
@@ -315,18 +353,22 @@ def run_validation() -> Path:
                 else:
                     print(f"  [cache hit] reuse scan {key[:2]}", flush=True)
 
-                rows.extend(_validate_scan_result(
+                new_rows = _validate_scan_result(
                     variant, scan, symbol, as_of, rng,
                     random_pick=cfg["random_pick"], provider=provider,
-                ))
+                )
+                _append_rows(new_rows, out_csv)
+                n_new_rows += len(new_rows)
+                done_keys.add(key3)
 
     elapsed = time.perf_counter() - t0
-    print(f"\nTotal elapsed : {elapsed/60:.1f} min ; rows={len(rows)}")
+    print(f"\nTotal elapsed : {elapsed/60:.1f} min ; new_rows={n_new_rows}")
 
-    df = pd.DataFrame(rows)
-    out_csv = OUTPUT_DIR / "validation_full.csv"
-    df.to_csv(out_csv, index=False)
-    print(f"  wrote {out_csv}")
+    if not out_csv.exists() or out_csv.stat().st_size == 0:
+        print("  [WARN] aucun row genere, pas de rapport.")
+        return out_csv
+    df = pd.read_csv(out_csv)
+    print(f"  read {out_csv} ({len(df)} rows total)")
 
     if not df.empty:
         summary = _generate_summary(df)
