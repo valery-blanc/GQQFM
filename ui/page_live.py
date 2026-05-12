@@ -16,8 +16,9 @@ from engine.backend import xp
 from engine.combinator import generate_combinations
 from engine.pnl import combinations_to_tensor, compute_pnl_batch
 from scoring.filters import filter_combinations, realistic_max_gain
-from scoring.metrics import compute_combo_metrics
+from scoring.metrics import compute_combo_metrics, compute_term_slopes
 from scoring.probability import compute_loss_probability
+from scoring.regime import compute_regime_factor
 from scoring.scorer import score_combinations
 from templates import ALL_TEMPLATES
 from ui.components.chart import plot_pnl_profile, plot_pnl_mini
@@ -32,7 +33,6 @@ _PAGE_SIZE = _GRID_ROWS * _GRID_COLS  # 24
 def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
     """Pipeline complet pour un seul symbol."""
     criteria = params["criteria"]
-    vol_scenarios = [params["vol_low"], 1.0, params["vol_high"]]
     rfr = params["risk_free_rate"]
     selected = params["selected_templates"]
 
@@ -42,6 +42,15 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
     provider = YFinanceProvider()
     chain = provider.get_options_chain(symbol)
     spot = chain.underlying_price
+
+    # FEAT-030-C : vol bands calibrées HV (si checkbox activé) + FEAT-030-B HV30 pour régime.
+    if params.get("use_hv_calibration", False):
+        hv30, vol_low, vol_high = provider.get_hv30_and_vol_bands(symbol)
+    else:
+        from screener.options_analyzer import compute_hv30
+        hv30 = compute_hv30(symbol)
+        vol_low, vol_high = params["vol_low"], params["vol_high"]
+    vol_scenarios = [vol_low, 1.0, vol_high]
 
     progress.progress(15, text=f"[{symbol}] Génération des combinaisons...")
 
@@ -96,6 +105,13 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
     days_list = [(c.close_date - chain.fetch_timestamp.date()).days for c in all_combinations]
     days_to_close = max(1, int(statistics.median(days_list)))
 
+    # FEAT-030-A : pente de terme calculée (utilisée par compute_combo_metrics
+    # pour le scoring ET affichée dans le tableau), MAIS PAS appliquée comme
+    # filtre disqualifiant par défaut (backout 2026-05-11).
+    term_slopes_all = compute_term_slopes(all_combinations)
+    # FEAT-030-B : facteur de régime — scalaire, n'affecte pas le ranking.
+    regime_factor = compute_regime_factor(hv30, atm_vol)
+
     valid_indices = filter_combinations(
         pnl_tensor, spot_range, net_debits, avg_volumes,
         criteria, spot, atm_vol, days_to_close, rfr,
@@ -126,13 +142,21 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
     today = chain.fetch_timestamp.date()
     weights = params.get("score_weights") or config.SCORE_WEIGHTS_DEFAULT
 
+    term_slopes_filtered = term_slopes_all[valid_indices_cpu]
+    # Backout FEAT-030 : hv30=0.0 → fenêtre ±1σ via IV uniquement (comportement
+    # pré-FEAT-030). term_slope_arr passé pour affichage colonne mais poids 0.
     metrics_batch = compute_combo_metrics(
         filtered_combos, pnl_filtered, spot_range, net_debits_f,
         current_spot=spot, today=today, risk_free_rate=rfr,
         atm_vol_global=atm_vol, days_to_close_global=days_to_close,
+        hv30=0.0, term_slope_arr=term_slopes_filtered,
     )
 
-    scores = score_combinations(metrics_batch, weights, event_score_factors=event_factors)
+    scores = score_combinations(
+        metrics_batch, weights,
+        event_score_factors=event_factors,
+        regime_factor=regime_factor,
+    )
     scores_cpu = to_cpu(scores)
 
     safe_debits = to_cpu(net_debits_f)
@@ -151,6 +175,8 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
     realistic_range_cpu = to_cpu(metrics_batch.realistic_range_pct)
     atm_vol_per_cpu = to_cpu(metrics_batch.atm_vol_per_combo)
     capital_required_cpu = to_cpu(metrics_batch.capital_required)
+    term_slope_cpu = to_cpu(metrics_batch.term_slope)   # FEAT-030
+    tg_ratio_cpu = to_cpu(metrics_batch.tg_ratio)       # FEAT-030
 
     metrics = []
     for i in range(len(filtered_combos)):
@@ -178,6 +204,9 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
             "_nd_raw":               float(safe_debits[i]),
             "_nd_used":              cap_req,
             "_max_loss_dollar":      max_loss_d,
+            # FEAT-030
+            "term_slope":            float(term_slope_cpu[i]),   # NaN possible (K=1)
+            "tg_ratio":              float(tg_ratio_cpu[i]),
         })
 
     order = sorted(range(len(filtered_combos)), key=lambda i: -metrics[i]["score"])
@@ -203,6 +232,10 @@ def run_scan(params: dict, symbol: str, event_calendar=None) -> dict:
         "spot": spot,
         "days_before_close": params.get("days_before_close", 3),
         "realistic_range_pct": None,
+        # FEAT-030 — exposés pour l'indicateur de régime UI.
+        "hv30": float(hv30),
+        "iv_atm": float(atm_vol),
+        "regime_factor": float(regime_factor),
     }
 
 

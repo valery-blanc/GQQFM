@@ -32,6 +32,20 @@ def _fmt_slippage(pct: float) -> str:
     return f"{pct:.1f}%"
 
 
+def _fmt_term_slope(val: float) -> str:
+    """FEAT-030 : format pente de terme. NaN = K=1 (RIC, backspread)."""
+    if val is None or math.isnan(val):
+        return "—"
+    return f"{val:.2f}×"
+
+
+def _fmt_tg_ratio(val: float) -> str:
+    """FEAT-030 : format theta/gamma. Positif = theta-positif (calendar OK)."""
+    if val is None or math.isnan(val):
+        return "—"
+    return f"{val:+.1f}"
+
+
 def render_results_table(
     combinations: list[Combination],
     metrics: list[dict],
@@ -77,6 +91,8 @@ def render_results_table(
             "Liq.": _fmt_liquidity(m.get("liquidity_score", 0.0)),
             "Disp. vol": f"{m.get('vol_dispersion_pct', 0.0):.1f}%",
             "Slipp.": _fmt_slippage(m.get("slippage_pct", float('nan'))),
+            "Pente IV": _fmt_term_slope(m.get("term_slope", float('nan'))),
+            "θ/Γ": _fmt_tg_ratio(m.get("tg_ratio", float('nan'))),
             "Ratio G/L": f"{m['gain_loss_ratio']:.2f}",
             "Score": f"{m['score']:.3f}",
         })

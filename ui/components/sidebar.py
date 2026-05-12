@@ -47,6 +47,7 @@ def get_base_params() -> dict:
         "criteria":            criteria,
         "vol_low":             float(ss.get("p_vol_low", 0.8)),
         "vol_high":            float(ss.get("p_vol_high", 1.2)),
+        "use_hv_calibration":  bool(ss.get("p_use_hv_calibration", False)),  # FEAT-030-C (default OFF — voir FEAT-029)
         "risk_free_rate":      float(ss.get("p_risk_free_rate", config.DEFAULT_RISK_FREE_RATE)),
         "max_combinations":    int(ss.get("p_max_combos", 400_000)),
         "days_before_close":   int(ss.get("p_days_before_close", 3)),

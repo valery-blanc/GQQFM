@@ -31,18 +31,27 @@ GPU_SAFETY_FACTOR: float = 2.5
 # Nombre max de combinaisons générées par template
 MAX_COMBINATIONS: int = 500_000
 
-# ── Scoring weights — FEAT-026 (score composite v2) ────────────────────────────
-# 7 composants additifs normalisés min-max sur la population filtrée.
-# Modifiables dans l'UI (sidebar) via st.session_state["score_weights"].
+# ── Scoring weights ────────────────────────────────────────────────────────────
+# 9 composants additifs normalisés min-max sur la population filtrée.
+# Modifiables dans l'UI (page Paramètres) via st.session_state["score_weights"].
+#
+# Défauts = FEAT-026 (poids 1-7). Les poids FEAT-030 (`w_term_slope`,
+# `w_tg_ratio`) sont à **0.0 par défaut** suite au backtest FEAT-029/030 du
+# 2026-05-11 qui a montré que leur activation dégrade le ranking
+# (Spearman +0.024 → -0.022, TopK +0.82% → -1.84%). Le code reste disponible :
+# l'utilisateur peut les activer manuellement via les sliders.
 @dataclass
 class ScoreWeights:
-    w_gain_real: float = 0.25     # gain max ±1σ — priorité #1 utilisateur
+    w_gain_real: float = 0.25     # gain max ±1σ — priorité #1 utilisateur (FEAT-026)
     w_annualized: float = 0.20    # rendement %/an = max_gain_real_pct × 365 / days
     w_loss_prob: float = 0.15     # 1 − probabilité de perte (lognormale)
     w_max_loss: float = 0.10      # 1 − |perte max %| (sécurité worst-case)
     w_liquidity: float = 0.10     # min(volume × OI) sur les legs
     w_robustness: float = 0.10    # robustesse aux scénarios de vol
     w_slippage: float = 0.10      # 1 − Σ(ask−bid) / net_debit (NaN-safe)
+    # FEAT-030 — désactivés par défaut (cf. backout 2026-05-11)
+    w_term_slope: float = 0.0     # pente de terme IV_near / IV_far
+    w_tg_ratio: float = 0.0       # theta_net / |gamma_net|
 
     def normalized(self) -> "ScoreWeights":
         """Renormalise les poids pour que la somme soit 1.0."""
@@ -53,6 +62,21 @@ class ScoreWeights:
 
 
 SCORE_WEIGHTS_DEFAULT = ScoreWeights()
+
+# ── FEAT-030 — Filtres et seuils structurels ──────────────────────────────────
+# Pente de terme : un combo avec IV_near < IV_far n'a pas d'edge calendaire.
+# Tolérance 5% pour les cas limites (légère backwardation transitoire).
+MIN_TERM_STRUCTURE_SLOPE: float = 0.95
+
+# Multiplicateur de score selon le ratio HV30 / IV_ATM.
+# Itéré dans l'ordre : on prend le premier dont le ratio < threshold.
+# Formats (threshold_max, factor) — derniers seuils sont des fallbacks.
+REGIME_HV_IV_THRESHOLDS: list = [
+    (0.60, 1.05),   # hv_iv < 0.60   → factor 1.05 (vol chère vs réalité)
+    (0.85, 1.00),   # 0.60 ≤ < 0.85  → factor 1.00 (régime normal)
+    (1.00, 0.80),   # 0.85 ≤ < 1.00  → factor 0.80 (marché trending)
+    (9.99, 0.55),   # ≥ 1.00         → factor 0.55 (trend fort, calendars KO)
+]
 
 # ── Screener ──
 SCREENER_MIN_PRICE: float = 50.0

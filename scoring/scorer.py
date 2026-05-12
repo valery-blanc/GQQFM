@@ -1,6 +1,6 @@
-"""Score composite v2 (FEAT-026 + 026b) — classement multi-critères des combinaisons.
+"""Score composite v3 (FEAT-026 + 026b + FEAT-030) — classement multi-critères.
 
-Sept composants additifs normalisés min-max sur la population filtrée :
+Neuf composants additifs normalisés min-max sur la population filtrée :
   Score = w1 × norm(max_gain_real_dollar)         # FEAT-026b : gain ±1σ EN $
         + w2 × norm(annualized_return_pct)
         + w3 × (1 − norm(loss_prob))
@@ -8,13 +8,16 @@ Sept composants additifs normalisés min-max sur la population filtrée :
         + w5 × norm(liquidity_score)
         + w6 × (1 − norm(vol_dispersion_pct))
         + w7 × (1 − norm(slippage_pct))           # NaN remplacé par médiane
+        + w8 × norm(term_slope)                   # FEAT-030 : NaN → médiane (K=1 neutre)
+        + w9 × norm(tg_ratio)                     # FEAT-030 : theta/gamma
 
 Le 1er composant utilise le **gain en dollars** (pas en %) : le rendement
 annualisé (composant 2) tient déjà compte du capital immobilisé via
 `max_gain_real_pct = gain / capital_required × 100`.
 
-Le multiplicateur événementiel (FEAT-005) reste appliqué en sortie :
-  Score_final = Score × event_score_factor
+Les multiplicateurs sortie (appliqués après l'addition) :
+  Score_final = Score × event_score_factor × regime_factor
+              (FEAT-005)            (FEAT-030-B, scalaire global)
 """
 
 from __future__ import annotations
@@ -53,15 +56,18 @@ def score_combinations(
     metrics: ComboMetricsBatch,
     weights: config.ScoreWeights,
     event_score_factors: "xp.ndarray | None" = None,
+    regime_factor: float = 1.0,
 ) -> "xp.ndarray":
-    """Score composite v2, shape (C,), valeurs ∈ [0, 1] (avant facteur event).
+    """Score composite v3, shape (C,), valeurs ∈ [0, 1] (avant facteurs externes).
 
     Args:
         metrics: arrays per-combo calculés par scoring/metrics.py.
-        weights: poids du score (modifiables UI). Renormalisés à somme=1
-            si l'utilisateur a modifié les sliders.
+        weights: poids du score (modifiables UI). Renormalisés à somme=1.
         event_score_factors: shape (C,) — multiplicateur événementiel par combo
             (FEAT-005). Si None → 1.0 partout (rétrocompatible).
+        regime_factor: FEAT-030-B — multiplicateur scalaire selon HV30/IV_ATM.
+            Calculé via `scoring/regime.py:compute_regime_factor`. Défaut 1.0
+            (neutre) si HV30 indisponible.
 
     Returns:
         Array shape (C,) du score composite final, prêt à être trié.
@@ -75,6 +81,9 @@ def score_combinations(
     s_liq = _normalize(metrics.liquidity_score)
     s_robv = 1.0 - _normalize(metrics.vol_dispersion_pct)
     s_slip = 1.0 - _normalize(_fillna_with_median(metrics.slippage_pct))
+    # FEAT-030 : term_slope (NaN K=1 → médiane = neutre) et tg_ratio.
+    s_ts = _normalize(_fillna_with_median(metrics.term_slope))
+    s_tg = _normalize(_fillna_with_median(metrics.tg_ratio))
 
     score = (
         w.w_gain_real * s_gain
@@ -84,9 +93,13 @@ def score_combinations(
         + w.w_liquidity * s_liq
         + w.w_robustness * s_robv
         + w.w_slippage * s_slip
+        + w.w_term_slope * s_ts
+        + w.w_tg_ratio * s_tg
     )
 
     if event_score_factors is not None:
         score = score * event_score_factors
+    # Multiplicateur de régime (scalaire, FEAT-030-B).
+    score = score * float(regime_factor)
 
     return score

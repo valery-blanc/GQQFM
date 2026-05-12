@@ -1,6 +1,16 @@
-"""Black-Scholes européen + Bjerksund-Stensland 1993 américain, vectorisés GPU/CPU."""
+"""Black-Scholes européen + Bjerksund-Stensland 1993 américain, vectorisés GPU/CPU.
+
+FEAT-030 : ajoute Greeks (gamma, theta) en versions GPU et CPU. Les versions
+CPU sont utilisées dans `scoring/metrics.py` pour le calcul per-leg de
+`tg_ratio` (theta_net / gamma_abs), évitant le marshaling CPU↔GPU coûteux.
+"""
+
+import math
 
 from engine.backend import xp, ndtr
+
+# √(2π), constante module-level (évite l'allocation à chaque appel).
+_SQRT_2PI: float = math.sqrt(2.0 * math.pi)
 
 
 # ── Helpers Bjerksund-Stensland 1993 ─────────────────────────────────────────
@@ -184,3 +194,97 @@ def intrinsic_value(
     put_val = xp.maximum(strike - spot, 0.0)
     is_call = (option_type == 0)
     return xp.where(is_call, call_val, put_val)
+
+
+# ── Greeks (FEAT-030) ────────────────────────────────────────────────────────
+# Versions GPU vectorisées (signature comme bs_price) + versions CPU pures
+# pour la boucle per-leg dans scoring/metrics.py (évite GPU round-trips).
+
+
+def _bs_nd1(spot, strike, tte, vol, rate):
+    """N'(d1) = PDF gaussienne en d1. Partagée par bs_theta et bs_gamma.
+    Vectorisée — supporte les shapes (M, N) comme bs_price."""
+    safe_tte = xp.maximum(tte, xp.float32(1e-8))
+    safe_vol = xp.maximum(vol, xp.float32(1e-8))
+    sqrt_T = xp.sqrt(safe_tte)
+    d1 = (xp.log(spot / strike) + (rate + 0.5 * safe_vol ** 2) * safe_tte) / (safe_vol * sqrt_T)
+    return xp.exp(-0.5 * d1 ** 2) / xp.float32(_SQRT_2PI)
+
+
+def bs_gamma(spot, strike, tte, vol, rate):
+    """Gamma Black-Scholes européen (identique call/put).
+    Γ = N'(d1) / (S × σ × √T)
+    Retourne 0 où le résultat n'est pas fini (vol≈0, tte≈0, etc.)."""
+    safe_tte = xp.maximum(tte, xp.float32(1e-8))
+    safe_vol = xp.maximum(vol, xp.float32(1e-8))
+    nd1 = _bs_nd1(spot, strike, tte, vol, rate)
+    result = nd1 / (spot * safe_vol * xp.sqrt(safe_tte))
+    return xp.where(xp.isfinite(result), result, xp.float32(0.0))
+
+
+def bs_theta(option_type, spot, strike, tte, vol, rate):
+    """Theta Black-Scholes européen, en $/jour (divisé par 365).
+
+    Θ_call = [-(S × N'(d1) × σ) / (2√T) - r × K × e^(-rT) × N(d2)] / 365
+    Θ_put  = [-(S × N'(d1) × σ) / (2√T) + r × K × e^(-rT) × N(-d2)] / 365
+
+    Θ_call < 0 (coût du temps long un call). Θ_put ≤ 0 sauf put deep ITM (rare).
+
+    option_type : 0 = call, 1 = put.
+    """
+    safe_tte = xp.maximum(tte, xp.float32(1e-8))
+    safe_vol = xp.maximum(vol, xp.float32(1e-8))
+    sqrt_T = xp.sqrt(safe_tte)
+    d1 = (xp.log(spot / strike) + (rate + 0.5 * safe_vol ** 2) * safe_tte) / (safe_vol * sqrt_T)
+    d2 = d1 - safe_vol * sqrt_T
+
+    nd1 = xp.exp(-0.5 * d1 ** 2) / xp.float32(_SQRT_2PI)
+    disc = xp.exp(-xp.float32(rate) * safe_tte)
+
+    decay_term = -(spot * nd1 * safe_vol) / (2.0 * sqrt_T)
+    rate_term_call = -xp.float32(rate) * strike * disc * ndtr(d2)
+    rate_term_put = +xp.float32(rate) * strike * disc * ndtr(-d2)
+
+    theta_call = decay_term + rate_term_call
+    theta_put = decay_term + rate_term_put
+    is_call = xp.asarray(option_type) == 0
+    annual = xp.where(is_call, theta_call, theta_put)
+    daily = annual / xp.float32(365.0)
+    return xp.where(xp.isfinite(daily), daily, xp.float32(0.0))
+
+
+# ── Versions CPU pures (utilisées dans compute_combo_metrics) ────────────────
+# Importent numpy + scipy.stats.norm directement, pas xp/cupy.
+# Évite le marshaling GPU↔CPU à chaque leg (40 round-trips par step sinon).
+
+def bs_gamma_cpu(spot: float, strike: float, tte: float,
+                 vol: float, rate: float) -> float:
+    """Gamma scalaire CPU (numpy/math). Retourne 0.0 si non-fini."""
+    if tte <= 0 or vol <= 0 or spot <= 0 or strike <= 0:
+        return 0.0
+    sqrt_T = math.sqrt(tte)
+    d1 = (math.log(spot / strike) + (rate + 0.5 * vol * vol) * tte) / (vol * sqrt_T)
+    nd1 = math.exp(-0.5 * d1 * d1) / _SQRT_2PI
+    g = nd1 / (spot * vol * sqrt_T)
+    return g if math.isfinite(g) else 0.0
+
+
+def bs_theta_cpu(option_type: str, spot: float, strike: float, tte: float,
+                 vol: float, rate: float) -> float:
+    """Theta scalaire CPU en $/jour. option_type : 'call' ou 'put'.
+    Retourne 0.0 si non-fini ou paramètres dégénérés."""
+    if tte <= 0 or vol <= 0 or spot <= 0 or strike <= 0:
+        return 0.0
+    from scipy.stats import norm as _norm
+    sqrt_T = math.sqrt(tte)
+    d1 = (math.log(spot / strike) + (rate + 0.5 * vol * vol) * tte) / (vol * sqrt_T)
+    d2 = d1 - vol * sqrt_T
+    nd1 = math.exp(-0.5 * d1 * d1) / _SQRT_2PI
+    disc = math.exp(-rate * tte)
+    decay = -(spot * nd1 * vol) / (2.0 * sqrt_T)
+    if option_type == "call":
+        annual = decay - rate * strike * disc * _norm.cdf(d2)
+    else:
+        annual = decay + rate * strike * disc * _norm.cdf(-d2)
+    daily = annual / 365.0
+    return daily if math.isfinite(daily) else 0.0

@@ -11,14 +11,41 @@
 - [x] `docs/specs/option_scanner_spec_v2.md` — section replay : nouvelles capacités + retirer "IV historique" des limitations V3
 - [x] Déploiement ANQA + validation utilisateur (24/04 13h30 → marker pose à +25.9%)
 
+## FEAT-030 — Score composite v3 : métriques structurelles
+
+- [x] Spec `docs/specs/FEAT-030-score-structurel-v3.md` (5 améliorations A-E)
+- [x] Spec patchée : 5 bugs corrigés + 4 sections FEAT-029 ajoutées
+- [ ] `engine/black_scholes.py` — `_SQRT_2PI`, `_bs_nd1`, `bs_gamma`, `bs_theta` (GPU) + `bs_gamma_cpu`, `bs_theta_cpu` (CPU pur)
+- [ ] `config.py` — `MIN_TERM_STRUCTURE_SLOPE`, `REGIME_HV_IV_THRESHOLDS`, `ScoreWeights` → 9 composants
+- [ ] `scoring/regime.py` (NOUVEAU) — `compute_hv30_from_closes`, `compute_hv30_from_bars`, `compute_hv30_percentiles`, `compute_regime_factor`
+- [ ] `scoring/metrics.py` — helper `compute_term_slopes`, params `term_slope_arr` / `hv30`, calcul `tg_ratio` per-leg, 2 nouveaux champs `ComboMetricsBatch`
+- [ ] `scoring/filters.py` — params `hv30` + `term_slope_per_combo` (skip NaN)
+- [ ] `scoring/scorer.py` — `s_ts`, `s_tg`, param `regime_factor`
+- [ ] `data/provider_yfinance.py` — `get_hv30_and_vol_bands(symbol, lookback_days)` (wrapper sur `scoring.regime`)
+- [ ] `ui/page_live.py` — `term_slopes_all` pré-calc, `compute_hv30`, `regime_factor`, dict keys
+- [ ] `ui/page_backtest.py` — fetch explicite bars 150j avant as_of + idem live
+- [ ] `ui/page_params.py` — checkbox `p_use_hv_calibration` + 2 entrées `_WEIGHT_FIELDS`
+- [ ] `ui/components/sidebar.py` — propager `p_use_hv_calibration` dans `get_base_params()`
+- [ ] `ui/components/results_table.py` — colonnes `Pente IV` et `θ/Γ`
+- [ ] `scripts/validate_ranking.py` — supprimer `_hv30_percentiles`, importer `scoring.regime`
+- [ ] Tests : `test_black_scholes.py` (GPU + CPU Greeks), `test_regime.py` (NOUVEAU), `test_scoring.py` (term_slope + tg_ratio + filtre), `test_scan_vs_direct.py` (force `use_hv_calibration=False`)
+- [ ] `docs/specs/option_scanner_spec_v2.md` — §6.4 + §5 + §A3
+- [x] Validation empirique post-implémentation : variantes `feat_030_abde` + `feat_030_full` ajoutées, run ANQA terminé (48 steps, +281 rows CSV)
+- [!] Critère d'acceptation **NON ATTEINT** : Spearman(feat_030_abde) = -0.022 (vs current +0.024). TopK_mean = -1.84% (vs +0.82%). Hit rate 53.9% (vs 61.6%). **FEAT-030 DÉGRADE le ranking.**
+- [x] **Backout 2026-05-11** : poids `w_term_slope` et `w_tg_ratio` mis à 0.0 dans ScoreWeights ; filtre term_slope NON appliqué dans `filter_combinations` ; `hv30=0.0` passé à `compute_combo_metrics` (= fenêtre ±1σ IV-only, comportement pré-FEAT-030). Code FEAT-030 reste disponible pour activation manuelle via sliders.
+- [ ] Investigation racine : pourquoi Spearman ≈ 0 sur `current` ? Revoir formule du score composite v2 (hypothèses : `max_gain_real_pct` optimise un pic peu probable ; `loss_prob` lognormale sous-estime les queues)
+- [ ] Déploiement ANQA + validation utilisateur (test post-backout)
+- [ ] Commit final
+
 ## FEAT-029 — Backtest de validation du ranking
 
 - [x] `scripts/validate_ranking.py` — orchestrateur (boucle variants × symbols × dates)
 - [x] Variantes : `current`, `days_bc_0`, `days_bc_5`, `bs_eur`, `iv_calibrated`, `random`
 - [x] Sortie : CSV brut + summary + scatters PNG + rapport Markdown
 - [x] `run_backtest_scan` headless via `progress_callback` (sans st.progress)
-- [ ] Lancement ANQA (ETA ~3 h)
-- [ ] Décision : adopter / ne pas adopter chaque variante selon les chiffres
+- [x] Run ANQA réduit (3 var × 3 sym × 8 dates = 72 steps en 69 min) — terminé 2026-05-11 20h22
+- [x] Décision : `iv_calibrated` ne bat PAS `current` (Spearman 0.016 vs 0.024, TopK -0.13% vs +0.82%) → **FEAT-030-C en checkbox OFF par défaut**
+- [x] Découverte critique : Spearman rank↔real ≈ 0 pour current → **le scoring v2 n'a quasi pas de pouvoir prédictif**. `random` bat même `current` sur TopK (+2.99% vs +0.82%). Le scoring v2 sélectionne possiblement les MAUVAIS combos.
 
 ## Done
 

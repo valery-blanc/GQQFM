@@ -71,32 +71,31 @@ def _build_dates(n: int = 30,
     return out
 
 
-DATES_TO_TEST: list[date] = _build_dates()
+# FEAT-029 reduced sample : 8 dates parmi les 30 originales (chains cached
+# sur Tulear pour TOUTES les 30 dates → cache hits garantis quand on prend
+# un sous-ensemble). On prend les indices 0, 4, 8, 12, 16, 20, 24, 28
+# pour couvrir uniformement la fenetre 2024-09 → 2026-04.
+_FULL_DATES = _build_dates(n=30)
+DATES_TO_TEST: list[date] = [_FULL_DATES[i] for i in (0, 4, 8, 12, 16, 20, 24, 28)]
 
 
 # ── Variantes ──────────────────────────────────────────────────────────────────
 # Une variante = config qui modifie le params dict du scan.
 # `vol_calibration: True` declenche le calcul percentiles HV30 par (symbol, as_of).
 VARIANTS: dict[str, dict] = {
-    "current":       {"days_before_close": 3, "use_american_pricer": True,
+    # FEAT-030 round : ne re-fait QUE les variantes feat_030_* car
+    # current/iv_calibrated/random sont deja dans le CSV checkpoint FEAT-029.
+    # `feat_030_abde` : composants A+B+D+E uniquement (sans C). Compare
+    # contre `current` (CSV existant FEAT-029) pour mesurer l'effet net
+    # des nouvelles metriques structurelles sans calibration vol.
+    # `feat_030_full` : A+B+C+D+E. Compare contre `iv_calibrated` (old code)
+    # pour mesurer l'effet combine.
+    "feat_030_abde": {"days_before_close": 3, "use_american_pricer": True,
                       "vol_factors": (0.8, 1.2), "vol_calibration": False,
                       "random_pick": False},
-    "days_bc_0":     {"days_before_close": 0, "use_american_pricer": True,
-                      "vol_factors": (0.8, 1.2), "vol_calibration": False,
-                      "random_pick": False},
-    "days_bc_5":     {"days_before_close": 5, "use_american_pricer": True,
-                      "vol_factors": (0.8, 1.2), "vol_calibration": False,
-                      "random_pick": False},
-    "bs_eur":        {"days_before_close": 3, "use_american_pricer": False,
-                      "vol_factors": (0.8, 1.2), "vol_calibration": False,
-                      "random_pick": False},
-    "iv_calibrated": {"days_before_close": 3, "use_american_pricer": True,
+    "feat_030_full": {"days_before_close": 3, "use_american_pricer": True,
                       "vol_factors": (0.8, 1.2), "vol_calibration": True,
                       "random_pick": False},
-    # `random` reutilise le scan de `current` (memes params) mais top-K aleatoire.
-    "random":        {"days_before_close": 3, "use_american_pricer": True,
-                      "vol_factors": (0.8, 1.2), "vol_calibration": False,
-                      "random_pick": True},
 }
 
 
@@ -110,28 +109,22 @@ def _hv30_percentiles(provider: PolygonHistoricalProvider,
                       symbol: str, as_of: date,
                       lookback_days: int = 365) -> tuple[float, float, float] | None:
     """Retourne (p10, current, p90) de la HV30 rolling sur 1 an avant as_of.
-    Retourne None si donnees insuffisantes."""
+    Retourne None si donnees insuffisantes.
+
+    FEAT-030 : wrapper retro-compatible autour de
+    `scoring.regime.compute_hv30_percentiles` — pas de duplication de logique.
+    """
     from backtesting.replay import _prefetch_daily_range  # type: ignore
+    from scoring.regime import compute_hv30_percentiles
     start = as_of - timedelta(days=lookback_days + 60)
     bars = _prefetch_daily_range(provider, symbol.upper(), start, as_of)
     if not bars:
         return None
-    closes = [(d, c) for d, (c, _) in sorted(bars.items()) if c > 0]
-    if len(closes) < 60:
-        return None
-    arr = np.array([c for _, c in closes], dtype=np.float64)
-    log_ret = np.diff(np.log(arr))
-    win = 21
-    if len(log_ret) < win + 30:
-        return None
-    hv = np.array([
-        log_ret[i - win:i].std() * math.sqrt(252)
-        for i in range(win, len(log_ret) + 1)
-    ])
-    hv = hv[np.isfinite(hv) & (hv > 0)]
-    if len(hv) < 30:
-        return None
-    return float(np.percentile(hv, 10)), float(hv[-1]), float(np.percentile(hv, 90))
+    closes = np.array(
+        [c for d, (c, _) in sorted(bars.items()) if c > 0 and d <= as_of],
+        dtype=np.float64,
+    )
+    return compute_hv30_percentiles(closes, win=21, lookback=lookback_days)
 
 
 def _build_params(variant_cfg: dict,

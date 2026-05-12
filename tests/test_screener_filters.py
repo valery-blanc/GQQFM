@@ -312,18 +312,24 @@ def test_atm_liquidity_calls_and_puts_combined():
 
 
 def test_atm_liquidity_p25_detects_weak_leg():
-    """4 strikes ATM dont 1 à volume très faible → p25 capture la jambe faible."""
+    """4 strikes ATM dont 2 à volume très faible → p25 capture les jambes faibles.
+
+    Note : `vol.quantile(0.25)` (pandas linear interp) sur 4 valeurs triees
+    [a, b, c, d] donne `a + 0.75 * (b - a)`. Avec une seule jambe faible
+    (5, 400, 500, 600), p25 = 301.25 (interpole vers le 2e + bas). Il faut
+    2 jambes faibles pour que p25 reste bas.
+    """
     spot = 100.0
     rows = [
-        (95, 5, 100, 0.10, 3.0),     # jambe faible !
-        (98, 500, 2000, 0.05, 2.5),
+        (95, 5, 100, 0.10, 3.0),       # jambe faible #1
+        (98, 20, 500, 0.10, 2.5),      # jambe faible #2 (volume bas)
         (102, 400, 1800, 0.05, 2.4),
         (105, 600, 2200, 0.05, 2.0),
     ]
     chain = _make_chain(rows)
     atm = compute_atm_liquidity(chain, None, spot=spot, atm_band_pct=0.10)
-    # p25 (25e percentile) sur (5, 400, 500, 600) ≤ ~100 → < 20 disqualifie
-    assert atm.volume_p25 < 200.0
+    # p25 sur (5, 20, 400, 600) ≈ 5 + 0.75 × 15 = 16.25 → < 20 disqualifie
+    assert atm.volume_p25 < 50.0
 
 
 def test_atm_liquidity_off_hours_oi_sentinel():

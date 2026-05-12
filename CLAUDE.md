@@ -265,8 +265,7 @@ sont dans `~/.ssh/` sur Fez (copiées depuis Tulear le 2026-05-04) :
 
 **Git push GitHub** — toujours via SSH (remote `git@github.com:...`) :
 ```bash
-eval "$(ssh-agent -s)" && ssh-add ~/.ssh/id_ed25519
-GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" git push origin master
+GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_github -o StrictHostKeyChecking=no" git push origin master
 ```
 
 ### ANQA (Windows)

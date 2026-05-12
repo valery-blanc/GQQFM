@@ -193,3 +193,77 @@ class TestIntrinsicValue:
         put_val = intrinsic_value(make(1), make(110.0), make(100.0))
         assert _scalar(call_val) == 0.0
         assert _scalar(put_val) == 0.0
+
+
+# ── FEAT-030 — Tests Greeks (gamma, theta) ───────────────────────────────────
+
+import math
+from engine.black_scholes import bs_gamma, bs_theta, bs_gamma_cpu, bs_theta_cpu
+
+
+class TestBSGamma:
+    def test_atm_gamma_positive(self):
+        """Gamma ATM > 0 (toujours, jamais négatif)."""
+        g = bs_gamma(make(100.0), make(100.0), make(0.25), make(0.20), 0.05)
+        assert _scalar(g) > 0
+
+    def test_gamma_max_at_atm(self):
+        """Gamma est max au strike ATM, décroît OTM/ITM."""
+        g_atm = _scalar(bs_gamma(make(100.0), make(100.0), make(0.25), make(0.20), 0.05))
+        g_otm = _scalar(bs_gamma(make(80.0), make(100.0), make(0.25), make(0.20), 0.05))
+        g_itm = _scalar(bs_gamma(make(120.0), make(100.0), make(0.25), make(0.20), 0.05))
+        assert g_atm > g_otm
+        assert g_atm > g_itm
+
+    def test_gamma_zero_tte_returns_finite(self):
+        """tte ≈ 0 → gamma fini (clamps actifs)."""
+        g = bs_gamma(make(100.0), make(100.0), make(1e-10), make(0.20), 0.05)
+        assert math.isfinite(_scalar(g))
+
+
+class TestBSTheta:
+    def test_call_atm_theta_negative(self):
+        """Theta call ATM < 0 (coût du temps long un call)."""
+        t = bs_theta(make(0), make(100.0), make(100.0), make(0.25), make(0.20), 0.05)
+        assert _scalar(t) < 0
+
+    def test_put_atm_theta_negative_normal(self):
+        """Theta put ATM est généralement < 0 en régime classique (r > 0, faible div)."""
+        t = bs_theta(make(1), make(100.0), make(100.0), make(0.25), make(0.20), 0.05)
+        assert _scalar(t) < 0
+
+    def test_theta_is_daily(self):
+        """Le résultat est en $/jour (divisé par 365), pas en $/an.
+        Pour ATM call 25%T, theta annual ≈ -10 → daily ≈ -0.027."""
+        t = _scalar(bs_theta(make(0), make(100.0), make(100.0), make(0.25), make(0.20), 0.05))
+        # Sanity check: -0.05 < t < 0
+        assert -0.1 < t < 0.0
+
+
+class TestBSGammaCPU:
+    def test_gamma_cpu_matches_gpu(self):
+        """bs_gamma_cpu doit donner ~même résultat que bs_gamma."""
+        g_cpu = bs_gamma_cpu(100.0, 100.0, 0.25, 0.20, 0.05)
+        g_gpu = _scalar(bs_gamma(make(100.0), make(100.0), make(0.25), make(0.20), 0.05))
+        assert abs(g_cpu - g_gpu) < 1e-4
+
+    def test_gamma_cpu_zero_on_degenerate(self):
+        """tte=0, vol=0 → 0.0 (pas NaN/inf)."""
+        assert bs_gamma_cpu(100.0, 100.0, 0.0, 0.20, 0.05) == 0.0
+        assert bs_gamma_cpu(100.0, 100.0, 0.25, 0.0, 0.05) == 0.0
+
+
+class TestBSThetaCPU:
+    def test_theta_cpu_call_matches_gpu(self):
+        t_cpu = bs_theta_cpu("call", 100.0, 100.0, 0.25, 0.20, 0.05)
+        t_gpu = _scalar(bs_theta(make(0), make(100.0), make(100.0), make(0.25), make(0.20), 0.05))
+        assert abs(t_cpu - t_gpu) < 1e-4
+
+    def test_theta_cpu_put_matches_gpu(self):
+        t_cpu = bs_theta_cpu("put", 100.0, 100.0, 0.25, 0.20, 0.05)
+        t_gpu = _scalar(bs_theta(make(1), make(100.0), make(100.0), make(0.25), make(0.20), 0.05))
+        assert abs(t_cpu - t_gpu) < 1e-4
+
+    def test_theta_cpu_zero_on_degenerate(self):
+        assert bs_theta_cpu("call", 100.0, 100.0, 0.0, 0.20, 0.05) == 0.0
+        assert bs_theta_cpu("put", 100.0, 100.0, 0.25, 0.0, 0.05) == 0.0

@@ -38,8 +38,10 @@ def test_iv_rank_from_history_empty():
 
 
 def test_iv_rank_from_history_too_few_points():
-    """< 20 points → 50.0."""
-    history = [(date(2026, 1, i + 1), 0.20 + i * 0.01) for i in range(15)]
+    """< min_points (defaut 10) → 50.0.
+    Note : BUG-030 a baisse min_points de 20 a 10 — test mis a jour en consequence.
+    """
+    history = [(date(2026, 1, i + 1), 0.20 + i * 0.01) for i in range(5)]
     assert compute_iv_rank_from_history(history, current_iv=0.25) == pytest.approx(50.0)
 
 

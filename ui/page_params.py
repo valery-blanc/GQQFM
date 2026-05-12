@@ -23,6 +23,13 @@ _WEIGHT_FIELDS = [
      "Stabilité du P&L au spot courant entre les scénarios de vol."),
     ("w_slippage",   "Slippage (bid/ask)",
      "Pénalité spread bid/ask. Neutre (médiane) si données absentes."),
+    # FEAT-030
+    ("w_term_slope", "Pente de terme (IV near/far)",
+     "IV des legs courts ÷ IV des legs longs. Récompense les structures calendaires "
+     "avec vol proche plus chère que vol lointaine. K=1 (1 seule expiration) → score neutre."),
+    ("w_tg_ratio",   "Theta/Gamma",
+     "Theta net ÷ |Gamma net| à spot courant. Mesure la qualité intrinsèque du trade temps "
+     "(théta capté vs risque directionnel)."),
 ]
 
 
@@ -48,7 +55,7 @@ def _render_score_weights() -> None:
 
         new_values: dict[str, float] = {}
         for field, label, help_text in _WEIGHT_FIELDS:
-            value = float(current[field])
+            value = float(current.get(field, 0.0))
             normalized_share = value / total
             new_values[field] = st.slider(
                 f"{label} — {normalized_share:.0%}",
@@ -61,7 +68,7 @@ def _render_score_weights() -> None:
         new_total = sum(new_values.values()) or 1.0
         st.caption(f"Somme brute : **{new_total:.2f}** (renormalisée à 1.0).")
 
-        if any(abs(new_values[k] - current[k]) > 1e-9 for k in current):
+        if any(abs(new_values[k] - current.get(k, 0.0)) > 1e-9 for k in new_values):
             st.session_state["score_weights"] = ScoreWeights(**new_values)
 
 
@@ -111,12 +118,30 @@ def render_params_page() -> None:
 
     # ── Scénarios de volatilité ─────────────────────────────────────────────
     st.subheader("Scénarios de volatilité")
+    st.checkbox(
+        "Calibration auto HV (p10/p90 sur 90 jours)",
+        value=False,
+        key="p_use_hv_calibration",
+        help=(
+            "Quand activé (FEAT-030-C) : remplace les sliders ci-dessous par "
+            "des bandes calibrées sur la distribution historique réelle du "
+            "symbol (percentiles 10/90 de la HV30 sur 90 jours). Clampé "
+            "[0.40, 0.80] / [1.20, 2.50]. Sinon : sliders manuels.\n\n"
+            "⚠️ FEAT-029 (2026-05-11) : sur 141 combos top-10, iv_calibrated "
+            "n'améliore pas le Spearman vs current (0.016 vs 0.024) et "
+            "dégrade le TopK mean (-0.13% vs +0.82%). Désactivé par défaut "
+            "jusqu'à validation sur échantillon plus large."
+        ),
+    )
     st.caption("Le scénario médian (1.0×) est fixe et sert au filtrage.")
+    _hv_calib_on = st.session_state.get("p_use_hv_calibration", True)
     col_v1, col_v2 = st.columns(2)
     with col_v1:
-        st.slider("Vol basse (×)", 0.5, 0.95, 0.8, 0.05, key="p_vol_low")
+        st.slider("Vol basse (×)", 0.5, 0.95, 0.8, 0.05,
+                  key="p_vol_low", disabled=_hv_calib_on)
     with col_v2:
-        st.slider("Vol haute (×)", 1.05, 2.0, 1.2, 0.05, key="p_vol_high")
+        st.slider("Vol haute (×)", 1.05, 2.0, 1.2, 0.05,
+                  key="p_vol_high", disabled=_hv_calib_on)
 
     st.markdown("---")
 

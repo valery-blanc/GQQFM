@@ -109,6 +109,48 @@ class YFinanceProvider:
         rate, _ = fetch_risk_free_rate()
         return rate
 
+    def get_hv30_and_vol_bands(
+        self,
+        symbol: str,
+        lookback_days: int = 90,
+    ) -> tuple[float, float, float]:
+        """FEAT-030-B + 030-C — retourne (hv30, vol_low_factor, vol_high_factor).
+
+        - hv30 : volatilité historique 21-jours-de-trading annualisée.
+        - vol_low_factor / vol_high_factor : percentiles 10/90 de HV30 rolling
+          sur `lookback_days`, divisés par la HV30 actuelle, clampés à
+          [0.40, 0.80] et [1.20, 2.50] respectivement.
+
+        Fallback `(0.0, config.DEFAULT_VOL_LOW, config.DEFAULT_VOL_HIGH)`
+        si données insuffisantes (< 60 closes ou current_hv ≈ 0).
+        """
+        import numpy as np
+        from scoring.regime import compute_hv30_from_closes, compute_hv30_percentiles
+
+        try:
+            hist = yf.download(
+                symbol,
+                period=f"{lookback_days + 60}d",
+                interval="1d",
+                progress=False,
+                auto_adjust=True,
+            )
+            closes = hist["Close"].squeeze().dropna().to_numpy()
+        except Exception:
+            return (0.0, config.DEFAULT_VOL_LOW, config.DEFAULT_VOL_HIGH)
+
+        perc = compute_hv30_percentiles(closes, win=21, lookback=lookback_days)
+        if perc is None:
+            hv = compute_hv30_from_closes(closes, win=21)
+            return (hv, config.DEFAULT_VOL_LOW, config.DEFAULT_VOL_HIGH)
+
+        p10, current_hv, p90 = perc
+        if current_hv < 1e-6:
+            return (current_hv, config.DEFAULT_VOL_LOW, config.DEFAULT_VOL_HIGH)
+        low = float(np.clip(p10 / current_hv, 0.40, 0.80))
+        high = float(np.clip(p90 / current_hv, 1.20, 2.50))
+        return (current_hv, low, high)
+
     def get_options_chain(
         self,
         symbol: str,

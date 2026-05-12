@@ -20,8 +20,13 @@ from engine.backend import to_cpu, xp
 from engine.combinator import generate_combinations
 from engine.pnl import combinations_to_tensor, compute_pnl_batch
 from scoring.filters import filter_combinations, realistic_max_gain
-from scoring.metrics import compute_combo_metrics
+from scoring.metrics import compute_combo_metrics, compute_term_slopes
 from scoring.probability import compute_loss_probability
+from scoring.regime import (
+    compute_hv30_from_bars,
+    compute_hv30_percentiles,
+    compute_regime_factor,
+)
 from scoring.scorer import score_combinations
 from templates import ALL_TEMPLATES
 from ui.components.chart import plot_pnl_profile
@@ -51,7 +56,6 @@ def run_backtest_scan(
     from data.risk_free_rate import fetch_historical_risk_free_rate
 
     criteria = params["criteria"]
-    vol_scenarios = [params["vol_low"], 1.0, params["vol_high"]]
     scan_time: str | None = params.get("scan_time")
     selected = params["selected_templates"]
 
@@ -75,6 +79,32 @@ def run_backtest_scan(
         symbol, as_of=as_of, progress_callback=cb, scan_time=scan_time,
     )
     spot = chain.underlying_price
+
+    # FEAT-030-B + 030-C : fetch des bars 150j avant as_of pour HV30 + percentiles.
+    from backtesting.replay import _prefetch_daily_range
+    hv_start = as_of - timedelta(days=150)
+    try:
+        hv_bars = _prefetch_daily_range(provider, symbol.upper(), hv_start, as_of)
+    except Exception:
+        hv_bars = {}
+    hv30 = compute_hv30_from_bars(hv_bars, as_of)
+    # Vol bands : si use_hv_calibration, calcul des percentiles depuis les mêmes bars.
+    if params.get("use_hv_calibration", False) and hv_bars:
+        sorted_closes = np.array(
+            [c for d, (c, _) in sorted(hv_bars.items()) if d <= as_of and c > 0],
+            dtype=np.float64,
+        )
+        perc = compute_hv30_percentiles(sorted_closes, win=21, lookback=90)
+        if perc is not None and perc[1] > 1e-6:
+            p10, cur, p90 = perc
+            vol_low = float(np.clip(p10 / cur, 0.40, 0.80))
+            vol_high = float(np.clip(p90 / cur, 1.20, 2.50))
+        else:
+            vol_low, vol_high = params["vol_low"], params["vol_high"]
+    else:
+        vol_low, vol_high = params["vol_low"], params["vol_high"]
+    vol_scenarios = [vol_low, 1.0, vol_high]
+
     cb(0.97, f"Chain {symbol} : {len(chain.contracts)} contrats — génération combos…")
 
     # Génération combinaisons
@@ -132,6 +162,12 @@ def run_backtest_scan(
     days_list = [(c.close_date - as_of).days for c in all_combinations]
     days_to_close = max(1, int(statistics.median(days_list)))
 
+    # FEAT-030-A : pente de terme calculée pour affichage, mais filtre NON
+    # appliqué par défaut (backout 2026-05-11).
+    term_slopes_all = compute_term_slopes(all_combinations)
+    # FEAT-030-B : facteur de régime — scalaire, n'affecte pas le ranking.
+    regime_factor = compute_regime_factor(hv30, atm_vol)
+
     valid_indices = filter_combinations(
         pnl_tensor, spot_range, net_debits, avg_volumes,
         criteria, spot, atm_vol, days_to_close, rfr,
@@ -155,14 +191,20 @@ def run_backtest_scan(
     event_factors = xp.ones(len(filtered_combos), dtype=xp.float32)
     weights = params.get("score_weights") or config.SCORE_WEIGHTS_DEFAULT
 
+    term_slopes_filtered = term_slopes_all[valid_indices_cpu]
+    # Backout FEAT-030 : hv30=0.0 → fenêtre ±1σ via IV uniquement (comportement
+    # pré-FEAT-030). term_slope_arr passé pour affichage colonne mais poids 0.
     metrics_batch = compute_combo_metrics(
         filtered_combos, pnl_filtered, spot_range, net_debits_f,
         current_spot=spot, today=as_of, risk_free_rate=rfr,
         atm_vol_global=atm_vol, days_to_close_global=days_to_close,
+        hv30=0.0, term_slope_arr=term_slopes_filtered,
     )
 
     scores = score_combinations(
-        metrics_batch, weights, event_score_factors=event_factors,
+        metrics_batch, weights,
+        event_score_factors=event_factors,
+        regime_factor=regime_factor,
     )
     scores_cpu = to_cpu(scores)
 
@@ -182,6 +224,8 @@ def run_backtest_scan(
     daily_gain_cpu = to_cpu(metrics_batch.daily_gain_dollar)
     realistic_range_cpu = to_cpu(metrics_batch.realistic_range_pct)
     capital_required_cpu = to_cpu(metrics_batch.capital_required)
+    term_slope_cpu = to_cpu(metrics_batch.term_slope)   # FEAT-030
+    tg_ratio_cpu = to_cpu(metrics_batch.tg_ratio)       # FEAT-030
 
     metrics = []
     for i in range(len(filtered_combos)):
@@ -207,6 +251,9 @@ def run_backtest_scan(
             "capital_required":     cap_req,
             "days_to_close":        int(days_close_cpu[i]),
             "daily_gain_dollar":    float(daily_gain_cpu[i]),
+            # FEAT-030
+            "term_slope":           float(term_slope_cpu[i]),
+            "tg_ratio":             float(tg_ratio_cpu[i]),
         })
 
     order = sorted(range(len(filtered_combos)), key=lambda i: -metrics[i]["score"])
@@ -234,6 +281,10 @@ def run_backtest_scan(
         "days_before_close": params.get("days_before_close", 3),
         "realistic_range_pct": None,  # désormais per-combo dans metrics[i]
         "rfr": rfr,
+        # FEAT-030 — exposés pour l'indicateur de régime UI.
+        "hv30": float(hv30),
+        "iv_atm": float(atm_vol),
+        "regime_factor": float(regime_factor),
     }
 
 

@@ -14,17 +14,20 @@ def realistic_max_gain(
     current_spot: float,
     atm_vol: float,
     days_to_close: int,
+    hv30: float = 0.0,
 ) -> "xp.ndarray":
     """
     Gain max dans le range ±1σ de mouvement attendu (loi log-normale).
-    range = atm_vol × √(days_to_close / 365)
+    range = effective_vol × √(days_to_close / 365)
+    où effective_vol = max(atm_vol, hv30) si hv30 > 0 (FEAT-030-E), sinon atm_vol.
 
     Ex: SPY IV=15%, DTE=14j → ±2.9% | TSLA IV=60%, DTE=14j → ±11.8%
 
     Si aucun spot ne tombe dans le range (DTE très court), fallback sur max absolu.
     """
+    effective_vol = max(atm_vol, hv30) if hv30 > 0 else atm_vol
     T = max(days_to_close, 1) / 365.0
-    half_range = atm_vol * math.sqrt(T)
+    half_range = effective_vol * math.sqrt(T)
     lo = current_spot * (1.0 - half_range)
     hi = current_spot * (1.0 + half_range)
     mask = (spot_range >= lo) & (spot_range <= hi)
@@ -43,12 +46,20 @@ def filter_combinations(
     atm_vol: float,
     days_to_close: int,
     risk_free_rate: float,
+    term_slope_per_combo: "xp.ndarray | None" = None,
+    hv30: float = 0.0,
 ) -> "xp.ndarray":
     """
     Filtre les combinaisons satisfaisant tous les critères.
 
     Toutes les opérations sont effectuées sur GPU (ou CPU si pas de GPU).
     Retourne un array d'indices des combinaisons valides.
+
+    FEAT-030 :
+      - `term_slope_per_combo` (optionnel) : si fourni, applique le filtre
+        disqualifiant `term_slope >= config.MIN_TERM_STRUCTURE_SLOPE`.
+        Les valeurs NaN (K=1) passent toujours le filtre.
+      - `hv30` (optionnel) : élargit la fenêtre ±1σ via max(IV, HV).
     """
     # Scénario médian : index VOL_MEDIAN_INDEX (toujours 1 = vol × 1.0)
     pnl_mid = pnl_tensor[config.VOL_MEDIAN_INDEX]   # (C, M)
@@ -58,7 +69,9 @@ def filter_combinations(
     max_loss_abs = pnl_mid.min(axis=1)    # (C,) — valeurs négatives
     max_gain_abs = pnl_mid.max(axis=1)    # (C,) — valeurs positives
     # Gain réaliste : max P&L dans le range ±1σ de mouvement attendu
-    max_gain_real = realistic_max_gain(pnl_mid, spot_range, current_spot, atm_vol, days_to_close)
+    max_gain_real = realistic_max_gain(
+        pnl_mid, spot_range, current_spot, atm_vol, days_to_close, hv30=hv30,
+    )
 
     max_loss_pct = max_loss_abs / safe_debits * 100.0
     max_gain_real_pct = max_gain_real / safe_debits * 100.0
@@ -78,5 +91,12 @@ def filter_combinations(
         (net_debits <= criteria.max_net_debit) &
         (avg_volumes >= criteria.min_avg_volume)
     )
+
+    # FEAT-030-A : filtre disqualifiant term_slope (NaN passe toujours, c.-à-d. K=1).
+    if term_slope_per_combo is not None:
+        ts_finite = xp.isfinite(term_slope_per_combo)
+        ts_pass_value = term_slope_per_combo >= config.MIN_TERM_STRUCTURE_SLOPE
+        ts_pass = xp.where(ts_finite, ts_pass_value, xp.ones_like(ts_finite, dtype=bool))
+        mask = mask & ts_pass
 
     return xp.where(mask)[0]
